@@ -56,8 +56,10 @@ title=""
 [ -n "$tp" ] && [ -f "$tp" ] && title=$(grep '"type":"ai-title"' "$tp" | tail -1 | jq -r '.aiTitle // empty')
 
 # перевод названия на русский (Google Translate, fallback — оригинал).
-# Отключить можно через TELEGRAM_TRANSLATE=0 — тогда заголовки тредов не уходят к Google.
-if [ -n "$title" ] && [ "${TELEGRAM_TRANSLATE:-1}" != "0" ]; then
+# Пропускаем, если заголовок уже не на латинице (содержит не-ASCII — например,
+# кириллицу): не гоняем русский текст через Google впустую и не шлём его наружу.
+# Полностью отключить перевод можно через TELEGRAM_TRANSLATE=0.
+if [ -n "$title" ] && [ "${TELEGRAM_TRANSLATE:-1}" != "0" ] && ! printf '%s' "$title" | LC_ALL=C grep -q '[^ -~]'; then
   tru=$(curl -s --max-time 4 -G \
     --data-urlencode "q=$title" \
     'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ru&dt=t' \
