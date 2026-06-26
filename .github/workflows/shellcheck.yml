@@ -1,0 +1,16 @@
+name: shellcheck
+
+on: [push, pull_request]
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        env:
+          # SC1091 — sourcing tg-notify-lib.sh (внешний файл, проверять не нужно)
+          SHELLCHECK_OPTS: -e SC1091 -s sh
+        with:
+          severity: warning

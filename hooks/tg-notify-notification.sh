@@ -2,6 +2,7 @@
 # Notification (matcher=permission_prompt): шлёт уведомление, когда Claude
 # запрашивает разрешение на инструмент. Разделитель, жирный заголовок + папка,
 # суть запроса. Если включён Remote Control — добавляет ссылку на сессию.
+# shellcheck disable=SC2154  # m, tp, sid приходят через eval "$(jq -r @sh ...)" ниже
 . "$HOME/.claude/hooks/tg-notify-lib.sh"
 
 in=$(cat)

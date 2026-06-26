@@ -58,11 +58,15 @@ TELEGRAM_BOT_TOKEN=123:AAH... TELEGRAM_CHAT_ID=123456789 ./install.sh
    curl -s "https://api.telegram.org/bot<ТОКЕН>/getUpdates" | jq -r '.result[-1].message.chat.id'
    ```
    Придёт число — это ваш `chat_id`.
-3. Впишите оба значения в `~/.claude/telegram-notify.env`:
+3. Сохраните секреты в `~/.claude/telegram-notify.env`. Выполните в терминале, подставив свои значения:
    ```sh
+   cat > ~/.claude/telegram-notify.env <<'EOF'
    TELEGRAM_BOT_TOKEN=123456789:AAH...
    TELEGRAM_CHAT_ID=123456789
+   EOF
+   chmod 600 ~/.claude/telegram-notify.env
    ```
+   Либо откройте файл редактором: `nano ~/.claude/telegram-notify.env`. Если запускали `install.sh`, файл уже создан (шаблон или заполнен из окружения) — останется вписать значения.
 4. Перезапустите сессию Claude Code. Проверка отправки:
    ```sh
    . ~/.claude/hooks/tg-notify-lib.sh
@@ -76,6 +80,7 @@ TELEGRAM_BOT_TOKEN=123:AAH... TELEGRAM_CHAT_ID=123456789 ./install.sh
 | Вкл/выкл | файл-флаг `~/.claude/telegram-notify.on` | `touch` — включить, `rm` — выключить. Действует на все сессии сразу, без перезапуска. |
 | Порог | `TELEGRAM_MIN_SECONDS` в env-файле | секунды: `180` = 3 мин, `300` = 5 мин. |
 | Порог (мгновенно) | файл `~/.claude/telegram-min-seconds` | число секунд; читается с диска на каждый `Stop`, перебивает env без перезапуска. |
+| Перевод заголовка | `TELEGRAM_TRANSLATE` в env-файле | `0` — не переводить заголовок треда (не отправлять его в Google Translate). По умолчанию переводится. |
 | Отладка | файл-флаг `~/.claude/telegram-notify.debug` | при наличии хуки пишут лог событий в `/tmp/claude_notif_debug.log`. |
 
 **Почему флаг-файл, а не env:** библиотека читается с диска на каждый хук, поэтому флаг подхватывают и уже запущенные сессии. Env кэшируется на старте сессии.
@@ -123,6 +128,14 @@ claude-code-telegram-notify/
 ├── settings.hooks.json   # snippet блока hooks для ручной установки
 └── hooks/                # семь файлов: библиотека + шесть хуков
 ```
+
+## Если не работает
+
+- **Нет уведомлений** — проверьте флаг: `ls ~/.claude/telegram-notify.on` (нет файла → бот молчит), затем `tg_send`-тест из шага 4.
+- **`jq: command not found`** — нужен `jq` (1.6+): `brew install jq`.
+- **Сообщение не уходит** — неверный токен/`chat_id` в `~/.claude/telegram-notify.env`, либо Telegram недоступен (нужен прокси через `HTTPS_PROXY`).
+- **Двойные уведомления** — в `settings.json` задвоилась регистрация хуков (например, осталась старая ручная запись через `$HOME` рядом с записью install.sh по абсолютному пути). Уберите дубли или переустановите начисто (`uninstall.sh` → `install.sh`).
+- **Заголовок не переведён** — нет сети/таймаут переводчика, либо `TELEGRAM_TRANSLATE=0`; приходит оригинал.
 
 ## Лицензия
 

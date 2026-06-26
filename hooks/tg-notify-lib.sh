@@ -12,7 +12,8 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
   [ -f "$HOME/.claude/telegram-notify.env" ] && . "$HOME/.claude/telegram-notify.env"
 fi
 
-# разделитель-шапка сообщений
+# разделитель-шапка сообщений (используется в хуках, подключающих эту библиотеку)
+# shellcheck disable=SC2034  # TG_SEP используется внешними хуками
 TG_SEP="━━━━━━━━━━━━━━━"
 
 # HTML-экранирование для parse_mode=HTML
@@ -42,7 +43,7 @@ tg_send() {
   if [ ! -f "$HOME/.claude/telegram-notify.on" ] && [ "${TELEGRAM_NOTIFY:-0}" != "1" ]; then
     return 0
   fi
-  resp=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+  resp=$(curl -s --max-time 10 -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
     -d chat_id="${TELEGRAM_CHAT_ID}" \
     -d parse_mode=HTML \
     -d disable_web_page_preview=true \

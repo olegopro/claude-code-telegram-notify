@@ -11,13 +11,14 @@
 # Опции (через окружение):
 #   WITH_DEBUG=1   — поставить и отладочный хук (PreCompact + SessionStart)
 #   ENABLE=0       — не включать уведомления (не создавать флаг telegram-notify.on)
-#   CLAUDE_DIR=... — каталог Claude Code (по умолчанию ~/.claude)
+#   REF=v1.0.0     — поставить из тега/ветки (по умолчанию main)
+#   CLAUDE_DIR=... — каталог Claude Code (по умолчанию $CLAUDE_CONFIG_DIR или ~/.claude)
 set -e
 
 REPO="olegopro/claude-code-telegram-notify"
-BRANCH="${BRANCH:-main}"
-RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
-CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
+REF="${REF:-${BRANCH:-main}}"
+RAW="https://raw.githubusercontent.com/$REPO/$REF"
+CLAUDE_DIR="${CLAUDE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 SETTINGS="$CLAUDE_DIR/settings.json"
 ENV_FILE="$CLAUDE_DIR/telegram-notify.env"
@@ -57,6 +58,17 @@ else
 fi
 chmod +x "$HOOKS_DIR"/tg-notify-*.sh
 say "хуки установлены в $HOOKS_DIR"
+
+# при нестандартном каталоге подставить его в хуки (по умолчанию они ссылаются на
+# $HOME/.claude для библиотеки/секретов/флагов — иначе чтение шло бы не оттуда)
+if [ "$CLAUDE_DIR" != "$HOME/.claude" ]; then
+  for h in $HOOKS; do
+    sed "s|\$HOME/.claude|$CLAUDE_DIR|g" "$HOOKS_DIR/$h" > "$HOOKS_DIR/$h.tmp" \
+      && mv "$HOOKS_DIR/$h.tmp" "$HOOKS_DIR/$h"
+  done
+  chmod +x "$HOOKS_DIR"/tg-notify-*.sh
+  say "хуки настроены на каталог $CLAUDE_DIR"
+fi
 
 # 3. секреты → ~/.claude/telegram-notify.env (не коммитится)
 if [ ! -f "$ENV_FILE" ]; then

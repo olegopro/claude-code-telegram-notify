@@ -4,6 +4,7 @@
 # Формат (HTML): разделитель, жирный заголовок с длительностью, переведённое
 # на русский название треда (ai-title), имя папки. Если включён Remote Control —
 # добавляется прямая ссылка на сессию.
+# shellcheck disable=SC2154  # sid, tp приходят через eval "$(jq -r @sh ...)" ниже
 . "$HOME/.claude/hooks/tg-notify-lib.sh"
 
 in=$(cat)
@@ -54,8 +55,9 @@ proj=$(basename "$CLAUDE_PROJECT_DIR")
 title=""
 [ -n "$tp" ] && [ -f "$tp" ] && title=$(grep '"type":"ai-title"' "$tp" | tail -1 | jq -r '.aiTitle // empty')
 
-# перевод названия на русский (Google Translate, fallback — оригинал)
-if [ -n "$title" ]; then
+# перевод названия на русский (Google Translate, fallback — оригинал).
+# Отключить можно через TELEGRAM_TRANSLATE=0 — тогда заголовки тредов не уходят к Google.
+if [ -n "$title" ] && [ "${TELEGRAM_TRANSLATE:-1}" != "0" ]; then
   tru=$(curl -s --max-time 4 -G \
     --data-urlencode "q=$title" \
     'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ru&dt=t' \
