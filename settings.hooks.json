@@ -1,0 +1,29 @@
+{
+  "_comment": "Справочный snippet. install.sh домёрживает это в ~/.claude/settings.json автоматически. Здесь — для ручной установки: впишите блок hooks (и при желании env). Пути через $HOME переносимы между машинами.",
+  "hooks": {
+    "UserPromptSubmit": [
+      { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-start.sh\"" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-stop.sh\"" } ] }
+    ],
+    "Notification": [
+      { "matcher": "permission_prompt", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-notification.sh\"" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-permit.sh\"" } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-end.sh\"" } ] }
+    ],
+    "_debug_optional": {
+      "_comment": "Опционально, только для отладки последовательности событий. Включается установкой WITH_DEBUG=1.",
+      "PreCompact": [
+        { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-debug.sh\"" } ] }
+      ],
+      "SessionStart": [
+        { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-debug.sh\"" } ] }
+      ]
+    }
+  }
+}

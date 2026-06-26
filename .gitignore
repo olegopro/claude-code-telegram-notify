@@ -1,0 +1,8 @@
+# секреты — никогда не коммитим
+*.env
+!.env.example
+telegram-notify.env
+
+# бэкапы и мусор
+*.bak
+.DS_Store
