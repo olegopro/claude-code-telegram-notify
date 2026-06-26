@@ -1,5 +1,8 @@
 # 🔔 claude-code-telegram-notify
 
+[![shellcheck](https://github.com/olegopro/claude-code-telegram-notify/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/olegopro/claude-code-telegram-notify/actions/workflows/shellcheck.yml)
+[![tests](https://github.com/olegopro/claude-code-telegram-notify/actions/workflows/test.yml/badge.svg)](https://github.com/olegopro/claude-code-telegram-notify/actions/workflows/test.yml)
+
 Telegram-уведомления для [Claude Code](https://claude.com/claude-code) на хуках. Бот пишет в Telegram, когда длинная сессия завершилась или Claude просит разрешение на инструмент. Чат держится **синхронным с терминалом**: уведомление само исчезает, когда работа продолжена или сессия закрыта.
 
 ```
@@ -126,8 +129,12 @@ claude-code-telegram-notify/
 ├── uninstall.sh          # удаление
 ├── .env.example          # шаблон секретов
 ├── settings.hooks.json   # snippet блока hooks для ручной установки
-└── hooks/                # семь файлов: библиотека + шесть хуков
+├── tests/                # bats-тесты идемпотентности установщика
+├── hooks/                # семь файлов: библиотека + шесть хуков
+└── CHANGELOG.md          # история версий
 ```
+
+История изменений — в [CHANGELOG.md](CHANGELOG.md).
 
 ## Если не работает
 
