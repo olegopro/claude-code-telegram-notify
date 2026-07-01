@@ -3,6 +3,10 @@
 Заметные изменения проекта. Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версии — [SemVer](https://semver.org/lang/ru/).
 
+## [Unreleased]
+### Fixed
+- `stop.sh`: guard фоновых задач не распознавал инструмент `Workflow` (только Bash `run_in_background`) — формат `Workflow launched in background. Task ID: X` не совпадал с regex, заточенным под `Command running in background with ID: X`, и «Завершено» уходило раньше реального конца воркфлоу.
+
 ## [1.0.2] — 2026-06-26
 ### Added
 - bats-тесты идемпотентности установщика (двойной `install` не плодит дубли, посторонние хуки не затрагиваются) + CI-workflow для них.

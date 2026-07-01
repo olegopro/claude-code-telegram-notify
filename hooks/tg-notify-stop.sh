@@ -26,13 +26,14 @@ tg_log "Stop sid=$sid dur=${dur}s thr=${thr}s"
 # короче порога — не засоряем чат
 [ "$dur" -ge "$thr" ] || exit 0
 
-# Фоновые shell ещё работают? Stop срабатывает на конце turn, а задачи из
-# run_in_background живут дальше и реактивируют сессию позже. Если в транскрипте
-# есть запущенный фоновый ID ("Command running in background with ID: X") без
-# парного <task-id>X</task-id> (метка завершения) — turn кончился, а работа нет:
-# молчим. Уведомление уйдёт на финальном Stop, когда фон вернулся и обработан.
+# Фоновые задачи ещё работают? Stop срабатывает на конце turn, а run_in_background
+# и Workflow-инструмент живут дальше и реактивируют сессию позже. Ищем в транскрипте
+# запущенный фоновый ID — либо Bash ("Command running in background with ID: X"),
+# либо Workflow ("Workflow launched in background. Task ID: X") — без парного
+# <task-id>X</task-id> (метка завершения, общая для обоих механизмов) — turn кончился,
+# а работа нет: молчим. Уведомление уйдёт на финальном Stop, когда фон вернулся и обработан.
 if [ -n "$tp" ] && [ -f "$tp" ]; then
-  bg_launched=$(grep -oE 'background with ID: [A-Za-z0-9]+' "$tp" | sed -E 's/.*: //' | sort -u)
+  bg_launched=$(grep -oE 'background with ID: [A-Za-z0-9_-]+|Workflow launched in background\. Task ID: [A-Za-z0-9_-]+' "$tp" | sed -E 's/.*: //' | sort -u)
   if [ -n "$bg_launched" ]; then
     bg_done=$(grep -oE '<task-id>[A-Za-z0-9]+</task-id>' "$tp" | sed -E 's#</?task-id>##g' | sort -u)
     if [ -z "$bg_done" ]; then
