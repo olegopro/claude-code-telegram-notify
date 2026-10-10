@@ -10,12 +10,14 @@ CLAUDE_DIR="${CLAUDE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 SETTINGS="$CLAUDE_DIR/settings.json"
 
-# файлы этого проекта (и только они)
-HOOKS="tg-notify-lib.sh tg-notify-start.sh tg-notify-stop.sh tg-notify-notification.sh tg-notify-permit.sh tg-notify-end.sh tg-notify-debug.sh"
-# имена хуков, которые регистрируются в settings.json (lib не регистрируется).
-# Якорь "/" перед именем — чтобы не задеть посторонние вроде tg-notify-chrome-apply.sh
-# или гипотетический my-tg-notify-end.sh.
-OURS='/tg-notify-(start|stop|notification|permit|end|debug)\.sh'
+# файлы этого проекта (и только они). С 2026-10-10 — один скрипт плюс библиотека;
+# старые имена перечислены отдельно, чтобы удалялись и следы прежней установки.
+HOOKS="tg-notify-lib.sh tg-notify.sh tg-notify-start.sh tg-notify-stop.sh tg-notify-notification.sh tg-notify-permit.sh tg-notify-end.sh tg-notify-debug.sh"
+# Записи в settings.json: новый вид (`sh "…/tg-notify.sh" <подкоманда>`) И старый
+# (`tg-notify-<действие>.sh`) — чтобы вычищались оба. Якорь "/" перед именем не даёт
+# задеть посторонние вроде гипотетического my-tg-notify-end.sh или чужого
+# tg-notify-chrome-apply.sh из локальной сборки владельца.
+OURS='/tg-notify\.sh"|/tg-notify-(start|stop|notification|permit|end|debug)\.sh'
 
 say() { printf '  %s\n' "$1"; }
 

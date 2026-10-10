@@ -2,27 +2,27 @@
   "_comment": "Справочный snippet. install.sh домёрживает это в ~/.claude/settings.json автоматически. Здесь — для ручной установки: впишите блок hooks (и при желании env). Пути через $HOME переносимы между машинами.",
   "hooks": {
     "UserPromptSubmit": [
-      { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-start.sh\"" } ] }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" prompt" } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-stop.sh\"" } ] }
+      { "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" stop" } ] }
     ],
     "Notification": [
-      { "matcher": "permission_prompt", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-notification.sh\"" } ] }
+      { "matcher": "permission_prompt", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" ask" } ] }
     ],
     "PreToolUse": [
-      { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-permit.sh\"" } ] }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" permit" } ] }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-end.sh\"" } ] }
+      { "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" end" } ] }
     ],
     "_debug_optional": {
       "_comment": "Опционально, только для отладки последовательности событий. Включается установкой WITH_DEBUG=1.",
       "PreCompact": [
-        { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-debug.sh\"" } ] }
+        { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" debug" } ] }
       ],
       "SessionStart": [
-        { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify-debug.sh\"" } ] }
+        { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" debug" } ] }
       ]
     }
   }

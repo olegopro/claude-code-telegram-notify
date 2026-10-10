@@ -19,8 +19,9 @@ teardown() {
 @test "double install does not duplicate hook registrations" {
   WITH_DEBUG=1 sh "$REPO_ROOT/install.sh"
   WITH_DEBUG=1 sh "$REPO_ROOT/install.sh"
-  for h in start stop notification permit end; do
-    n=$(jq --arg h "tg-notify-$h.sh" '[.hooks[]?[]?.hooks[]?|select((.command//"")|contains($h))]|length' "$TEST_DIR/settings.json")
+  # с 2026-10-10 регистрация — один скрипт плюс подкоманда
+  for sub in prompt stop ask permit end; do
+    n=$(jq --arg s "tg-notify.sh\" $sub" '[.hooks[]?[]?.hooks[]?|select((.command//"")|contains($s))]|length' "$TEST_DIR/settings.json")
     [ "$n" -eq 1 ]
   done
 }
@@ -36,14 +37,24 @@ teardown() {
   [ -f "$TEST_DIR/telegram-notify.env" ]
 }
 
-@test "all seven hook files are installed" {
+@test "both hook files are installed (lib + single script)" {
   WITH_DEBUG=1 sh "$REPO_ROOT/install.sh"
-  for h in lib start stop notification permit end debug; do
-    [ -f "$TEST_DIR/hooks/tg-notify-$h.sh" ]
+  [ -f "$TEST_DIR/hooks/tg-notify-lib.sh" ]
+  [ -f "$TEST_DIR/hooks/tg-notify.sh" ]
+  # старых файлов быть не должно
+  for old in start stop notification permit end debug; do
+    [ ! -f "$TEST_DIR/hooks/tg-notify-$old.sh" ]
   done
+}
+
+@test "debug hook is registered with its subcommand" {
+  WITH_DEBUG=1 sh "$REPO_ROOT/install.sh"
+  n=$(jq '[.hooks.PreCompact[]?.hooks[]?|select((.command//"")|contains("tg-notify.sh\" debug"))]|length' "$TEST_DIR/settings.json")
+  [ "$n" -eq 1 ]
 }
 
 @test "custom CLAUDE_DIR is substituted into hooks" {
   WITH_DEBUG=1 sh "$REPO_ROOT/install.sh"
   grep -q "$TEST_DIR/telegram-notify.env" "$TEST_DIR/hooks/tg-notify-lib.sh"
+  grep -q "$TEST_DIR" "$TEST_DIR/hooks/tg-notify.sh"
 }

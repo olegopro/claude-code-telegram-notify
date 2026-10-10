@@ -23,7 +23,10 @@ HOOKS_DIR="$CLAUDE_DIR/hooks"
 SETTINGS="$CLAUDE_DIR/settings.json"
 ENV_FILE="$CLAUDE_DIR/telegram-notify.env"
 
-HOOKS="tg-notify-lib.sh tg-notify-start.sh tg-notify-stop.sh tg-notify-notification.sh tg-notify-permit.sh tg-notify-end.sh tg-notify-debug.sh"
+# С 2026-10-10 ставится ОДИН скрипт (было семь: start/stop/notification/permit/end/debug
+# + lib) — ветвление по подкоманде. Старые имена файлов при обновлении просто перестают
+# использоваться; их регистрации в settings.json убирает uninstall.sh (якорь знает оба вида).
+HOOKS="tg-notify-lib.sh tg-notify.sh"
 
 say()  { printf '  %s\n' "$1"; }
 die()  { printf 'ОШИБКА: %s\n' "$1" >&2; exit 1; }
@@ -100,14 +103,15 @@ cp "$SETTINGS" "$SETTINGS.bak"
 DEBUG_FILTER=""
 if [ "${WITH_DEBUG:-0}" = "1" ]; then
   DEBUG_FILTER='
-    | ensure("PreCompact";   {matcher:"", hooks:[{type:"command", command:($H+"/tg-notify-debug.sh")|cmd}]})
-    | ensure("SessionStart"; {matcher:"", hooks:[{type:"command", command:($H+"/tg-notify-debug.sh")|cmd}]})'
+    | ensure("PreCompact";   {matcher:"", hooks:[{type:"command", command:hookcmd("debug")}]})
+    | ensure("SessionStart"; {matcher:"", hooks:[{type:"command", command:hookcmd("debug")}]})'
 fi
 
 tmp=$(mktemp)
 jq --arg H "$HOOKS_DIR" '
-  def cmd: "sh \"" + . + "\"";
-  # добавить $entry в .hooks[$e], если такой command там ещё нет
+  # команда вызова: sh "<каталог хуков>/tg-notify.sh" <подкоманда>
+  def hookcmd($sub): "sh \"" + $H + "/tg-notify.sh\" " + $sub;
+  # добавить $entry в .hooks[$e], если такого command там ещё нет
   def ensure($e; $entry):
     .hooks = (.hooks // {})
     | .hooks[$e] = (.hooks[$e] // [])
@@ -115,11 +119,11 @@ jq --arg H "$HOOKS_DIR" '
       then .
       else .hooks[$e] += [$entry]
       end;
-  ensure("UserPromptSubmit"; {matcher:"", hooks:[{type:"command", command:($H+"/tg-notify-start.sh")|cmd}]})
-  | ensure("Stop";          {hooks:[{type:"command", command:($H+"/tg-notify-stop.sh")|cmd}]})
-  | ensure("Notification";  {matcher:"permission_prompt", hooks:[{type:"command", command:($H+"/tg-notify-notification.sh")|cmd}]})
-  | ensure("PreToolUse";    {matcher:"", hooks:[{type:"command", command:($H+"/tg-notify-permit.sh")|cmd}]})
-  | ensure("SessionEnd";    {hooks:[{type:"command", command:($H+"/tg-notify-end.sh")|cmd}]})
+  ensure("UserPromptSubmit"; {matcher:"", hooks:[{type:"command", command:hookcmd("prompt")}]})
+  | ensure("Stop";          {hooks:[{type:"command", command:hookcmd("stop")}]})
+  | ensure("Notification";  {matcher:"permission_prompt", hooks:[{type:"command", command:hookcmd("ask")}]})
+  | ensure("PreToolUse";    {matcher:"", hooks:[{type:"command", command:hookcmd("permit")}]})
+  | ensure("SessionEnd";    {hooks:[{type:"command", command:hookcmd("end")}]})
   '"$DEBUG_FILTER"'
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
 say "хуки прописаны в $SETTINGS (бэкап: $SETTINGS.bak)"

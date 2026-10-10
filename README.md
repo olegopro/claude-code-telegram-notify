@@ -94,18 +94,19 @@ TELEGRAM_BOT_TOKEN=123:AAH... TELEGRAM_CHAT_ID=123456789 ./install.sh
 
 | Событие | Хук | Действие |
 |---|---|---|
-| `UserPromptSubmit` | `tg-notify-start.sh` | удаляет прошлые уведомления сессии (диалог продолжен), ставит метку времени старта |
-| `Stop` | `tg-notify-stop.sh` | если обработка дольше порога и фон завершён — шлёт «Завершено», запоминает `message_id` |
-| `Notification` | `tg-notify-notification.sh` | шлёт «Нужно разрешение» при запросе доступа к инструменту |
-| `PreToolUse` | `tg-notify-permit.sh` | инструмент начал выполняться → удаляет уведомление «Нужно разрешение» |
-| `SessionEnd` | `tg-notify-end.sh` | сессия закрыта → удаляет оставшиеся уведомления и чистит `/tmp` |
-| `PreCompact`/`SessionStart` | `tg-notify-debug.sh` | опционально (`WITH_DEBUG=1`): лог событий, на уведомления не влияет |
+| `UserPromptSubmit` | `tg-notify.sh prompt` | удаляет прошлые уведомления сессии (диалог продолжен), ставит метку времени старта |
+| `Stop` | `tg-notify.sh stop` | если обработка дольше порога и фон завершён — шлёт «Завершено», запоминает `message_id` |
+| `Notification` | `tg-notify.sh ask` | шлёт «Нужно разрешение» при запросе доступа к инструменту |
+| `PreToolUse` | `tg-notify.sh permit` | инструмент начал выполняться → удаляет уведомление «Нужно разрешение» |
+| `PreToolUse` + `PostToolUse` (matcher на chrome) | `tg-notify.sh chrome` | первый вызов Chrome в сессии → «Нужно нажать Apply»; успешное завершение → гасит его |
+| `SessionEnd` | `tg-notify.sh end` | сессия закрыта → удаляет оставшиеся уведомления и чистит `/tmp` |
+| `PreCompact`/`SessionStart` | `tg-notify.sh debug` | опционально (`WITH_DEBUG=1`): лог событий, на уведомления не влияет |
 
 Путь к транскрипту и `session_id` приходят хуку на stdin; папка проекта — в `$CLAUDE_PROJECT_DIR`. Время старта хранится в `/tmp/claude_notif_<session_id>`, отправленные `message_id` — в `/tmp/claude_notif_msg_<session_id>`.
 
 ### Почему «Завершено» не приходит раньше времени
 
-`Stop` срабатывает на конце **turn**, а фоновые задачи (`run_in_background`, инструмент `Workflow`) живут дальше и реактивируют сессию позже. `tg-notify-stop.sh` сверяет транскрипт: запущенный фоновый ID (Bash — `Command running in background with ID: X`, Workflow — `Workflow launched in background. Task ID: X`) против метки завершения `<task-id>X</task-id>`, общей для обоих механизмов. Есть незакрытый — уведомление откладывается до финального `Stop`, когда фон вернулся и обработан.
+`Stop` срабатывает на конце **turn**, а фоновые задачи (`run_in_background`, инструмент `Workflow`) живут дальше и реактивируют сессию позже. Подкоманда `stop` сверяет транскрипт: запущенный фоновый ID (Bash — `Command running in background with ID: X`, Workflow — `Workflow launched in background. Task ID: X`) против метки завершения `<task-id>X</task-id>`, общей для обоих механизмов. Есть незакрытый — уведомление откладывается до финального `Stop`, когда фон вернулся и обработан.
 
 ## Обновление и удаление
 

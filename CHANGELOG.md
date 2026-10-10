@@ -4,6 +4,10 @@
 версии — [SemVer](https://semver.org/lang/ru/).
 
 ## [Unreleased]
+### Changed
+- **Семь скриптов объединены в один `tg-notify.sh`** (2026-10-10). Ветвление — по первому аргументу-подкоманде (`prompt` · `stop` · `permit` · `ask` · `chrome` · `end` · `debug`), библиотека `tg-notify-lib.sh` не менялась. Регистрация в `settings.json` теперь `sh "$HOME/.claude/hooks/tg-notify.sh" <подкоманда>`; `install.sh` и `settings.hooks.json` обновлены, `uninstall.sh` чистит и старые имена файлов (следы прежней установки). Поведение уведомлений сохранено один-в-один, проверено прогоном каждой подкоманды и установкой в изолированном каталоге.
+- Подкоманда `chrome` (уведомление «Нужно нажать Apply в Chrome» и его гашение после успешного вызова) — раньше жила отдельным локальным файлом вне репозитория, теперь входит в общий скрипт.
+
 ### Fixed
 - `stop.sh`: guard фоновых задач не распознавал инструмент `Workflow` (только Bash `run_in_background`) — формат `Workflow launched in background. Task ID: X` не совпадал с regex, заточенным под `Command running in background with ID: X`, и «Завершено» уходило раньше реального конца воркфлоу.
 
