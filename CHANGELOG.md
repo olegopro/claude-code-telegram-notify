@@ -4,6 +4,8 @@
 версии — [SemVer](https://semver.org/lang/ru/).
 
 ## [Unreleased]
+
+## [1.1.0] — 2026-10-10
 ### Changed
 - **Семь скриптов объединены в один `tg-notify.sh`** (2026-10-10). Ветвление — по первому аргументу-подкоманде (`prompt` · `stop` · `permit` · `ask` · `chrome` · `end` · `debug`), библиотека `tg-notify-lib.sh` не менялась. Регистрация в `settings.json` теперь `sh "$HOME/.claude/hooks/tg-notify.sh" <подкоманда>`; `install.sh` и `settings.hooks.json` обновлены, `uninstall.sh` чистит и старые имена файлов (следы прежней установки). Поведение уведомлений сохранено один-в-один, проверено прогоном каждой подкоманды и установкой в изолированном каталоге.
 - Подкоманда `chrome` (уведомление «Нужно нажать Apply в Chrome» и его гашение после успешного вызова) — раньше жила отдельным локальным файлом вне репозитория, теперь входит в общий скрипт.
@@ -29,6 +31,7 @@
 - `tg_send --max-time` (зависший Telegram API не блокирует Stop-хук); opt-out перевода (`TELEGRAM_TRANSLATE=0`).
 - Guard фоновых задач: «Завершено» не уходит, пока в сессии есть незавершённые `run_in_background`.
 
+[1.1.0]: https://github.com/olegopro/claude-code-telegram-notify/releases/tag/v1.1.0
 [1.0.2]: https://github.com/olegopro/claude-code-telegram-notify/releases/tag/v1.0.2
 [1.0.1]: https://github.com/olegopro/claude-code-telegram-notify/releases/tag/v1.0.1
 [1.0.0]: https://github.com/olegopro/claude-code-telegram-notify/releases/tag/v1.0.0
