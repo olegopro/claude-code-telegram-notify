@@ -16,6 +16,16 @@ fi
 # shellcheck disable=SC2034  # TG_SEP используется внешними хуками
 TG_SEP="━━━━━━━━━━━━━━━"
 
+# короткое имя машины («MacBook Pro» / «MacBook Mini») — бот общий для обеих машин, и без
+# метки уведомления от них не различить. Зовётся только при сборке сообщения, не на
+# каждом хуке (scutil — лишний процесс, а permit висит на КАЖДОМ PreToolUse).
+tg_host() {
+  # полный путь: /usr/sbin бывает не в PATH хука — тогда вместо «MacBook Pro» вышло бы
+  # сетевое имя (hostname); на Linux scutil нет — сразу hostname
+  h=$(/usr/sbin/scutil --get ComputerName 2>/dev/null | sed "s/^.*’s //")
+  printf '%s' "${h:-$(hostname -s)}"
+}
+
 # HTML-экранирование для parse_mode=HTML
 tg_esc() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
 

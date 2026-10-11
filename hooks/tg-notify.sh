@@ -108,7 +108,7 @@ case "$cmd" in
     [ -z "$title" ] && title="$proj"
 
     msg=$(printf '%s\n\n\342\234\205 <b>Завершено</b> \302\267 ~%s мин\n\n\360\237\223\213 <b>%s</b>\n\n\360\237\223\201 %s%s' \
-      "$TG_SEP" "$mins" "$(tg_esc "$title")" "$(tg_esc "$proj")" "$(tg_rc_line "$tp")")
+      "$TG_SEP" "$mins" "$(tg_esc "$title")" "$(tg_esc "$proj · $(tg_host)")" "$(tg_rc_line "$tp")")
 
     mid=$(tg_send "$msg")
     [ -n "$mid" ] && printf '%s\n' "$mid" >> "/tmp/claude_notif_msg_${sid}"
@@ -128,7 +128,7 @@ case "$cmd" in
     m=$(printf '%s' "$in" | jq -r '.message // .hook_event_name // ""')
     proj=$(basename "$CLAUDE_PROJECT_DIR")
     msg=$(printf '%s\n\n\360\237\224\224 <b>Нужно разрешение</b> \302\267 %s\n\n%s%s' \
-      "$TG_SEP" "$(tg_esc "$proj")" "$(tg_esc "$m")" "$(tg_rc_line "$tp")")
+      "$TG_SEP" "$(tg_esc "$proj · $(tg_host)")" "$(tg_esc "$m")" "$(tg_rc_line "$tp")")
     mid=$(tg_send "$msg")
     [ -n "$mid" ] && [ -n "$sid" ] && printf '%s\n' "$mid" >> "/tmp/claude_notif_msg_${sid}"
     ;;
@@ -156,7 +156,7 @@ case "$cmd" in
         [ -f "$mark" ] && exit 0
         proj=$(basename "${CLAUDE_PROJECT_DIR:-$PWD}")
         msg=$(printf '%s\n\n\360\237\214\220 <b>Нужно нажать Apply в Chrome</b> \302\267 %s\n\nБраузер ждёт подтверждения подключения.' \
-          "$TG_SEP" "$(tg_esc "$proj")")
+          "$TG_SEP" "$(tg_esc "$proj · $(tg_host)")")
         mid=$(tg_send "$msg")
         printf '%s' "${mid:-done}" > "$mark"
         ;;

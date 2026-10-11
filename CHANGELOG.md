@@ -4,6 +4,8 @@
 версии — [SemVer](https://semver.org/lang/ru/).
 
 ## [Unreleased]
+### Added
+- **Имя машины в уведомлениях** (2026-10-11): строка проекта — «📁 <папка> · MacBook Pro». Один бот на несколько компьютеров, без метки уведомления от них не различить. `tg_host` в `tg-notify-lib.sh`: на macOS — `scutil --get ComputerName` без префикса «<имя>’s », иначе `hostname -s`. Зовётся только при сборке сообщения (`stop` / `ask` / `chrome`), не на каждом хуке: `permit` висит на каждом `PreToolUse`.
 
 ## [1.1.0] — 2026-10-10
 ### Changed
