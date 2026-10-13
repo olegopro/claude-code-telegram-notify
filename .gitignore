@@ -6,3 +6,7 @@ telegram-notify.env
 # бэкапы и мусор
 *.bak
 .DS_Store
+
+# кэш Python (появляется при запуске tests/e2e и mock-telegram)
+__pycache__/
+*.pyc

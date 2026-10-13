@@ -1,8 +1,9 @@
 #!/bin/sh
 # Установщик Telegram-уведомлений для Claude Code.
 # Можно запускать двумя способами:
-#   • локально из клона:   ./install.sh
+#   • локально из клона:   ./install.sh   (для приватного репозитория — единственный способ)
 #   • одной командой:      curl -fsSL https://raw.githubusercontent.com/olegopro/claude-code-telegram-notify/main/install.sh | sh
+#                          (работает, только пока репозиторий публичен: raw у приватного отдаёт 404)
 #
 # Идемпотентен: повторный запуск не плодит дубли. Перед правкой делает бэкап
 # settings.json. Секреты НЕ хранятся в репозитории — кладутся в отдельный
@@ -11,6 +12,7 @@
 # Опции (через окружение):
 #   WITH_DEBUG=1   — поставить и отладочный хук (PreCompact + SessionStart)
 #   ENABLE=0       — не включать уведомления (не создавать флаг telegram-notify.on)
+#   ENABLE_QUESTIONS=0 — не включать вопросы с кнопками (не создавать telegram-question.on)
 #   REF=v1.0.0     — поставить из тега/ветки (по умолчанию main)
 #   CLAUDE_DIR=... — каталог Claude Code (по умолчанию $CLAUDE_CONFIG_DIR или ~/.claude)
 set -e
@@ -108,14 +110,17 @@ if [ "${WITH_DEBUG:-0}" = "1" ]; then
 fi
 
 tmp=$(mktemp)
-jq --arg H "$HOOKS_DIR" '
+jq --arg H "$HOOKS_DIR" --arg HOME_DIR "$HOME" '
   # команда вызова: sh "<каталог хуков>/tg-notify.sh" <подкоманда>
   def hookcmd($sub): "sh \"" + $H + "/tg-notify.sh\" " + $sub;
+  # $HOME в команде и тот же путь абсолютным — одна и та же запись: ручная установка по
+  # settings.hooks.json пишет $HOME, установщик — абсолютный путь (иначе хуки задвоились бы)
+  def norm: gsub("\\$HOME"; $HOME_DIR) | gsub("\\$\\{HOME\\}"; $HOME_DIR);
   # добавить $entry в .hooks[$e], если такого command там ещё нет
   def ensure($e; $entry):
     .hooks = (.hooks // {})
     | .hooks[$e] = (.hooks[$e] // [])
-    | if any(.hooks[$e][]?.hooks[]?; .command == $entry.hooks[0].command)
+    | if any(.hooks[$e][]?.hooks[]?; ((.command // "") | norm) == ($entry.hooks[0].command | norm))
       then .
       else .hooks[$e] += [$entry]
       end;
@@ -124,6 +129,8 @@ jq --arg H "$HOOKS_DIR" '
   | ensure("Notification";  {matcher:"permission_prompt", hooks:[{type:"command", command:hookcmd("ask")}]})
   | ensure("PreToolUse";    {matcher:"", hooks:[{type:"command", command:hookcmd("permit")}]})
   | ensure("SessionEnd";    {hooks:[{type:"command", command:hookcmd("end")}]})
+  | ensure("PermissionRequest"; {matcher:"AskUserQuestion", hooks:[{type:"command", command:hookcmd("question"), timeout:3600}]})
+  | ensure("PostToolUse";   {matcher:"AskUserQuestion", hooks:[{type:"command", command:hookcmd("answered")}]})
   '"$DEBUG_FILTER"'
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
 say "хуки прописаны в $SETTINGS (бэкап: $SETTINGS.bak)"
@@ -134,6 +141,14 @@ if [ "${ENABLE:-1}" = "1" ]; then
   say "уведомления включены (флаг telegram-notify.on)"
 else
   say "уведомления НЕ включены (ENABLE=0). Включить: touch $CLAUDE_DIR/telegram-notify.on"
+fi
+
+# 6. вопросы с кнопками (AskUserQuestion → Telegram); работают только при включённых уведомлениях
+if [ "${ENABLE_QUESTIONS:-1}" = "1" ]; then
+  touch "$CLAUDE_DIR/telegram-question.on"
+  say "вопросы с кнопками включены (флаг telegram-question.on)"
+else
+  say "вопросы с кнопками НЕ включены (ENABLE_QUESTIONS=0). Включить: touch $CLAUDE_DIR/telegram-question.on"
 fi
 
 echo
