@@ -65,28 +65,18 @@ tg_api() {
   curl -s --max-time "${tg_maxtime:-10}" $TELEGRAM_CURL_OPTS -X POST "$TG_API/bot${TELEGRAM_BOT_TOKEN}/$tg_m" "$@" 2>/dev/null
 }
 
-# отправка готового HTML-текста в Telegram ($1 = текст)
+# отправка готового HTML-текста в Telegram ($1 = текст, $2 = JSON reply_markup — клавиатура,
+# необязательно); печатает message_id отправленного сообщения (для последующей правки/удаления).
 # Выключено (нет флага и TELEGRAM_NOTIFY=1) — тихо ничего не шлёт.
 tg_send() {
   tg_enabled || return 0
-  resp=$(tg_api sendMessage \
-    -d chat_id="${TELEGRAM_CHAT_ID}" \
-    -d parse_mode=HTML \
-    -d disable_web_page_preview=true \
-    --data-urlencode "text=$1")
-  # печатает message_id отправленного сообщения (для последующего удаления)
-  printf '%s' "$resp" | jq -r '.result.message_id // empty' 2>/dev/null
-}
-
-# то же с инлайн-клавиатурой ($1 = HTML-текст, $2 = JSON reply_markup); печатает message_id
-tg_send_kb() {
-  tg_enabled || return 0
+  # shellcheck disable=SC2086  # разметка добавляется только при непустом $2 (${2:+…} без кавычек)
   resp=$(tg_api sendMessage \
     -d chat_id="${TELEGRAM_CHAT_ID}" \
     -d parse_mode=HTML \
     -d disable_web_page_preview=true \
     --data-urlencode "text=$1" \
-    --data-urlencode "reply_markup=$2")
+    ${2:+--data-urlencode "reply_markup=$2"})
   printf '%s' "$resp" | jq -r '.result.message_id // empty' 2>/dev/null
 }
 
@@ -120,9 +110,7 @@ tg_edit_kb() {
 # Уходит в фоне: один вызов Bot API через VPN занимает ~1 с, и ждать его незачем.
 tg_cb_answer() {
   [ -n "$1" ] || return 0
-  ( tg_api answerCallbackQuery \
-      -d callback_query_id="$1" \
-      --data-urlencode "text=${2:-}" >/dev/null 2>&1 & )
+  tg_bg tg_api answerCallbackQuery -d callback_query_id="$1" --data-urlencode "text=${2:-}"
 }
 
 # непрочитанные обновления: только нажатия кнопок и сообщения ($1 = offset, пусто — все
@@ -132,21 +120,25 @@ tg_cb_answer() {
 # обновления при этом не теряются, опрос просто повторяется. Печатает JSON-ответ getUpdates.
 tg_updates() {
   tg_maxtime=$(( ${2:-0} + 10 ))
-  if [ -n "$1" ]; then
-    tg_api getUpdates -d offset="$1" -d timeout="${2:-0}" -d limit=100 \
-      --data-urlencode 'allowed_updates=["callback_query","message"]'
-  else
-    tg_api getUpdates -d timeout="${2:-0}" -d limit=100 \
-      --data-urlencode 'allowed_updates=["callback_query","message"]'
-  fi
+  # shellcheck disable=SC2086  # offset передаётся только при непустом $1 (${1:+…} без кавычек)
+  tg_api getUpdates ${1:+-d offset="$1"} -d timeout="${2:-0}" -d limit=100 \
+    --data-urlencode 'allowed_updates=["callback_query","message"]'
   tg_maxtime=
 }
 
 # удаление ранее отправленного сообщения ($1 = message_id); тихо, без вывода
 tg_delete() {
   [ -n "$1" ] || return 0
-  # shellcheck disable=SC2086  # см. tg_api
-  curl -s --max-time 5 $TELEGRAM_CURL_OPTS -X POST "$TG_API/bot${TELEGRAM_BOT_TOKEN}/deleteMessage" \
-    -d chat_id="${TELEGRAM_CHAT_ID}" \
-    -d message_id="$1" >/dev/null 2>&1
+  tg_maxtime=5
+  tg_api deleteMessage -d chat_id="${TELEGRAM_CHAT_ID}" -d message_id="$1" >/dev/null
+  tg_maxtime=
+}
+
+# вызвать команду в фоне со своими дескрипторами: там, где результат не нужен, а сеть до
+# Telegram даёт ~1 с на вызов — ждать незачем (двойной fork: нет зомби и записей в таблице заданий)
+tg_bg() { ( "$@" >/dev/null 2>&1 & ); }
+
+# строки «📁 папка» и «💻 машина» шапки сообщений ($1 = папка проекта)
+tg_where() {
+  printf '\360\237\223\201 %s\n\360\237\222\273 %s' "$(tg_esc "$1")" "$(tg_esc "$(tg_host)")"
 }

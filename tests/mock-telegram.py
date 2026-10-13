@@ -12,6 +12,7 @@ getUpdates честно ждёт новых обновлений до timeout с
   POST /_text         {"text": "...", "reply_to": N}      написать текст (ответом на сообщение)
   POST /_raw_update   {...}                              положить в очередь произвольное обновление
   POST /_conflict     {"on": true}                       getUpdates отвечает 409, как при вебхуке
+  POST /_fail_send    {"on": true}                       sendMessage отвечает отказом (вызов в журнале остаётся)
 """
 import json
 import sys
@@ -31,6 +32,7 @@ S = {
     "answers": [],      # answerCallbackQuery: {id, text}
     "confirmed": 0,     # максимальный offset, присланный клиентом
     "conflict": False,
+    "fail_send": False,
     "calls": [],        # журнал вызовов: метод
 }
 
@@ -113,6 +115,9 @@ class Handler(BaseHTTPRequestHandler):
             if parts[0] == "_conflict":
                 S["conflict"] = bool(params.get("on", True))
                 return self._reply({"ok": True})
+            if parts[0] == "_fail_send":
+                S["fail_send"] = bool(params.get("on", True))
+                return self._reply({"ok": True})
             if not parts[0].startswith("bot") or len(parts) < 2:
                 return self._reply({"ok": False, "description": "not found"}, 404)
             return self._reply(self._bot(parts[1], params))
@@ -120,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
     def _bot(self, method, p):
         S["calls"].append(method)
         if method == "sendMessage":
+            if S["fail_send"]:
+                return {"ok": False, "error_code": 500, "description": "mock: send failed"}
             S["next_msg"] += 1
             mid = S["next_msg"]
             S["messages"][mid] = {"message_id": mid, "text": p.get("text", ""), "date": int(time.time()),

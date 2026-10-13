@@ -467,7 +467,8 @@ answer_of() { jq -r --arg q "$2" '.hookSpecificOutput.decision.updatedInput.answ
   wait_for grep -qx "$mid" /tmp/claude_notif_msg_t-reg
   # следующий PreToolUse (permit) убирает сообщение из чата
   printf '%s' '{"session_id":"t-reg","hook_event_name":"PreToolUse","tool_name":"Bash"}' | sh "$HOOK" permit
-  [ "$(mock_state | jq --argjson m "$mid" '.messages[] | select(.message_id == $m) | .deleted')" = "true" ]
+  # удаление идёт в фоне — хук PreToolUse не ждёт Telegram
+  wait_for state_is "[.messages[] | select(.message_id == $mid)][0].deleted" true
 }
 
 @test "taps and texts from a foreign chat are ignored" {
@@ -630,6 +631,52 @@ perm_of() { jq -r ".hookSpecificOutput.decision.$2" "$TEST_DIR/out.$1"; }
   tap "$mid" "Разрешить"
   wait_for finished t-reply
   [ "$(perm_of t-reply behavior)" = "allow" ]
+}
+
+@test "permission: a new prompt closes the main agent's pending request" {
+  start_perm t-main "$PERM_BASH"
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  printf '%s' '{"session_id":"t-main","hook_event_name":"UserPromptSubmit"}' | sh "$HOOK" prompt
+  wait_for finished t-main
+  [ ! -s "$TEST_DIR/out.t-main" ]
+  wait_for msg_has "$mid" "Запрос закрыт"
+}
+
+@test "permission: a background agent's request survives a new prompt and Stop" {
+  # во входе хука субагента есть agent_id: ход главного агента его диалог не закрывает.
+  # Опрос короткий: хук заметил бы снятие состояния за секунду, а не за 5 с длинного опроса
+  export TELEGRAM_QUESTION_LONGPOLL=1
+  start_perm t-sub '{"tool_name":"Bash","tool_input":{"command":"ls"},"agent_id":"a1b2c3","agent_type":"general-purpose"}'
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  printf '%s' '{"session_id":"t-sub","hook_event_name":"UserPromptSubmit"}' | sh "$HOOK" prompt
+  printf '%s' '{"session_id":"t-sub","hook_event_name":"Stop"}' | sh "$HOOK" stop
+  sleep 2.5
+  [ ! -f "$TEST_DIR/done.t-sub" ]
+  [ "$(mock_state | jq --argjson m "$mid" '.messages[] | select(.message_id == $m) | .reply_markup.inline_keyboard | length')" -gt 0 ]
+  tap "$mid" "Разрешить"
+  wait_for finished t-sub
+  [ "$(perm_of t-sub behavior)" = "allow" ]
+}
+
+@test "permission: when the reason prompt is not delivered, a reply to the request is not a reason" {
+  start_perm t-nopr "$PERM_BASH"
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  # Telegram отказывает на отправке подсказки «Напишите причину»
+  mock_post /_fail_send '{"on": true}' >/dev/null
+  tap "$mid" "с причиной"
+  # второй sendMessage (подсказка) дошёл до mock и получил отказ
+  wait_for state_is '[.calls[] | select(. == "sendMessage")] | length' 2
+  mock_post /_fail_send '{"on": false}' >/dev/null
+  # ответ на само сообщение — не причина отказа: решения быть не должно
+  mock_post /_text "$(jq -nc --argjson r "$mid" '{text: "ок", reply_to: $r}')" >/dev/null
+  sleep 1.2
+  [ ! -f "$TEST_DIR/done.t-nopr" ]
+  tap "$mid" "Разрешить"
+  wait_for finished t-nopr
+  [ "$(perm_of t-nopr behavior)" = "allow" ]
 }
 
 @test "permission: AskUserQuestion and plan approval are left to their own flows" {

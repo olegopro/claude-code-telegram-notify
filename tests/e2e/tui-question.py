@@ -16,7 +16,9 @@ Code стартует с `--setting-sources project --settings <временны
     python3 tests/e2e/tui-question.py single series   # выбранные
     python3 tests/e2e/tui-question.py --proxy-from-settings   # взять прокси из ~/.claude/settings.json
 
-Сценарии: single · series · text · terminal · esc · perm-allow · perm-deny (описание — в SCENARIOS ниже).
+Сценарии: single · series · text · terminal · esc · perm-allow · perm-deny · perm-terminal
+(описание — в SCENARIOS ниже). Хуки регистрирует настоящий install.sh — стенд видит ровно то, что
+получит пользователь (matcher, таймауты, подкоманды).
 Код возврата: 0 — все прошли, 1 — есть провалы.
 """
 import argparse
@@ -145,40 +147,33 @@ class Stand:
         return None
 
     def start_tui(self):
-        home = os.path.join(self.tmp, "home")
-        os.makedirs(os.path.join(home, ".claude", "hooks"))
-        for f in ("tg-notify.sh", "tg-notify-lib.sh"):
-            shutil.copy(os.path.join(REPO, "hooks", f), os.path.join(home, ".claude", "hooks", f))
+        claude_dir = os.path.join(self.tmp, "claude-dir")
+        os.makedirs(claude_dir)
+        # хуки и settings.json ставит настоящий install.sh в изолированный CLAUDE_DIR (флаги и
+        # env-файл — тоже; пути в хуках он подставляет сам); HOME не трогаем — самому Claude Code
+        # нужна реальная авторизация. Секреты даём из окружения, как при ручной установке
+        install_env = dict(os.environ, CLAUDE_DIR=claude_dir, ENABLE_QUESTIONS="1",
+                           ENABLE_PERMISSIONS="1", TELEGRAM_BOT_TOKEN="test", TELEGRAM_CHAT_ID="42")
+        done = subprocess.run(["sh", os.path.join(REPO, "install.sh")], env=install_env,
+                              capture_output=True, text=True)
+        if done.returncode != 0:
+            raise RuntimeError("install.sh не отработал: " + (done.stderr or done.stdout)[-400:])
         # telegram-notify.debug: хуки пишут причины выхода в /tmp/claude_notif_debug.log
-        for flag in ("telegram-notify.on", "telegram-question.on", "telegram-permission.on", "telegram-notify.debug"):
-            open(os.path.join(home, ".claude", flag), "w").close()
+        open(os.path.join(claude_dir, "telegram-notify.debug"), "w").close()
+        settings_file = os.path.join(claude_dir, "settings.json")
+        # решение хука пишется в файл (TELEGRAM_DECISION_FILE) — сверять ответы по нему надёжнее,
+        # чем по экрану TUI; хуки наследуют окружение Claude Code (команды — без конвейера, как в
+        # рабочей регистрации: иначе sh -c гибнет по SIGTERM раньше хука)
         self.decision = os.path.join(self.tmp, "decision.json")
-        # команда хука — простая, без конвейера, как в рабочей регистрации (иначе sh -c гибнет по
-        # SIGTERM раньше хука); решение хук пишет в файл сам (TELEGRAM_DECISION_FILE)
-        hook = (f"HOME={home} TELEGRAM_BOT_TOKEN=test TELEGRAM_CHAT_ID=42 TELEGRAM_API_BASE={self.api} "
-                f"TELEGRAM_QUESTION_POLL=0.3 TELEGRAM_QUESTION_TIMEOUT=240 TELEGRAM_TRANSLATE=0 TELEGRAM_NOTIFY=1 "
-                f"TELEGRAM_DECISION_FILE={self.decision} NO_PROXY='*' no_proxy='*' sh {home}/.claude/hooks/tg-notify.sh")
-        settings = {"hooks": {
-            # решение хука пишется в файл (TELEGRAM_DECISION_FILE) — сверять ответы по нему надёжнее,
-            # чем по экрану TUI
-            "PermissionRequest": [
-                {"matcher": "AskUserQuestion", "hooks": [
-                    {"type": "command", "command": f"{hook} question", "timeout": 600}]},
-                {"matcher": "", "hooks": [
-                    {"type": "command", "command": f"{hook} permission", "timeout": 600}]},
-            ],
-            "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": f"{hook} answered"}]}],
-            "Notification": [{"matcher": "permission_prompt", "hooks": [{"type": "command", "command": f"{hook} ask"}]}],
-            "UserPromptSubmit": [{"hooks": [{"type": "command", "command": f"{hook} prompt"}]}],
-            "Stop": [{"hooks": [{"type": "command", "command": f"{hook} stop"}]}],
-            "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": f"{hook} permit"}]}],
-        }}
-        settings_file = os.path.join(self.tmp, "settings.json")
-        json.dump(settings, open(settings_file, "w"))
+        # mock — на 127.0.0.1: хуки ходят к нему мимо прокси (TELEGRAM_CURL_OPTS), сам Claude Code
+        # свой прокси сохраняет
+        hook_env = {"TELEGRAM_API_BASE": self.api, "TELEGRAM_QUESTION_POLL": "0.3",
+                    "TELEGRAM_QUESTION_TIMEOUT": "240", "TELEGRAM_TRANSLATE": "0",
+                    "TELEGRAM_DECISION_FILE": self.decision, "TELEGRAM_CURL_OPTS": "--noproxy 127.0.0.1"}
         project = os.path.join(self.tmp, "project")
         os.makedirs(project)
 
-        env = dict(os.environ, TERM="xterm-256color", DISABLE_AUTOUPDATER="1", NO_COLOR="1")
+        env = dict(os.environ, TERM="xterm-256color", DISABLE_AUTOUPDATER="1", NO_COLOR="1", **hook_env)
         if self.args.proxy_from_settings:
             try:
                 user = json.load(open(os.path.expanduser("~/.claude/settings.json"))).get("env") or {}
@@ -223,19 +218,18 @@ class Stand:
             shutil.rmtree(self.tmp, ignore_errors=True)
 
     # ── сценарий ───────────────────────────────────────────────────────────
-    def ask(self, prompt):
-        """Отправить промпт и дождаться вопроса и в Telegram, и в терминале."""
+    def ask(self, prompt, dialog=r"Entertoselect|Typesomething|Chataboutthis"):
+        """Отправить промпт и дождаться диалога (вопроса или разрешения) и в Telegram, и в терминале."""
         mark = len(self.screen())
         self.send(prompt); time.sleep(0.8); self.send("\r")
         end = time.time() + 90
         while time.time() < end and not self.messages():
             self.pump()
         if not self.messages():
-            raise AssertionError("вопрос не пришёл в Telegram")
-        in_terminal = self.wait_screen(r"Entertoselect|Typesomething|Chataboutthis", 30, since=mark)
-        if not in_terminal:
+            raise AssertionError("диалог не пришёл в Telegram")
+        if not self.wait_screen(dialog, 30, since=mark):
             raise AssertionError("диалог в терминале не показан (хук не должен его скрывать)")
-        self.log("вопрос в Telegram и диалог в терминале показаны ПАРАЛЛЕЛЬНО")
+        self.log("диалог в Telegram и в терминале показан ПАРАЛЛЕЛЬНО")
         return mark
 
     def decision_answers(self, timeout=60):
@@ -310,24 +304,20 @@ def scenario_esc(s):
     raise AssertionError("хук не убран по SIGTERM после Esc")
 
 
-def _perm_prompt(s):
+PERM_DIALOG = r"Doyouwanttoproceed|Yes|Allow|permission"
+
+
+def _perm_ask(s):
+    """Запрос разрешения на Bash: в Telegram и в терминале; возвращает (отметка экрана, файл команды)."""
     out = os.path.join(s.tmp, "perm-out.txt")
-    return ASK_BASH.format(out=out), out
+    mark = s.ask(ASK_BASH.format(out=out), PERM_DIALOG)
+    text = s.messages()[0]["text"]
+    assert "Нужно разрешение" in text and "printf" in text, "в сообщении нет инструмента и команды"
+    return mark, out
 
 
 def scenario_perm_allow(s):
-    prompt, out = _perm_prompt(s)
-    s.perm_mode = True  # применяется при следующем запуске; стенд запускает TUI заново ниже
-    mark = len(s.screen())
-    s.send(prompt); time.sleep(0.8); s.send("\r")
-    end = time.time() + 90
-    while time.time() < end and not s.messages():
-        s.pump()
-    assert s.messages(), "запрос разрешения не пришёл в Telegram"
-    assert "Нужно разрешение" in s.messages()[0]["text"] and "printf" in s.messages()[0]["text"], \
-        "в сообщении нет инструмента и команды"
-    assert s.wait_screen(r"Doyouwanttoproceed|Yes|Allow|permission", 30, since=mark), "диалог разрешения в терминале не показан"
-    s.log("запрос разрешения и в Telegram, и в терминале — ПАРАЛЛЕЛЬНО")
+    mark, _ = _perm_ask(s)
     s.tap("Разрешить")
     assert s.wait_screen(r"RESULT=PERM_42", 90, since=mark), "команда не выполнилась после «Разрешить»"
     dec = json.load(open(s.decision))["hookSpecificOutput"]["decision"]
@@ -336,20 +326,24 @@ def scenario_perm_allow(s):
 
 
 def scenario_perm_deny(s):
-    prompt, out = _perm_prompt(s)
-    s.perm_mode = True
-    mark = len(s.screen())
-    s.send(prompt); time.sleep(0.8); s.send("\r")
-    end = time.time() + 90
-    while time.time() < end and not s.messages():
-        s.pump()
-    assert s.messages(), "запрос разрешения не пришёл в Telegram"
+    mark, out = _perm_ask(s)
     s.tap("❌ Отклонить")
     assert s.wait_screen(r"RESULT=DENIED", 90, since=mark), "модель не получила отказ"
     dec = json.load(open(s.decision))["hookSpecificOutput"]["decision"]
     assert dec["behavior"] == "deny" and "denied" in dec["message"], dec
     assert not os.path.exists(out), "команда выполнилась, хотя отказано"
     assert s.wait_msg("Отклонено", 20)
+
+
+def scenario_perm_terminal(s):
+    mark, _ = _perm_ask(s)
+    time.sleep(2.0)
+    s.log("решение В ТЕРМИНАЛЕ: Enter («Yes»)")
+    s.send("\r")
+    assert s.wait_msg("Решено в терминале", 60), "хук не заметил решение в терминале (PostToolUse)"
+    assert s.wait_screen(r"RESULT=PERM_42", 90, since=mark), "команда не выполнилась"
+    # решения из Telegram не было — файл решения хука не создан
+    assert not os.path.exists(s.decision), "хук выдал решение, хотя ответили в терминале"
 
 
 SCENARIOS = {
@@ -360,6 +354,7 @@ SCENARIOS = {
     "esc": scenario_esc,          # Esc в терминале → SIGTERM хуку → Telegram прибран
     "perm-allow": scenario_perm_allow,  # обычный запрос разрешения (Bash) → «Разрешить» → команда выполнена
     "perm-deny": scenario_perm_deny,    # «Отклонить» → модель получает отказ, команда не выполнена
+    "perm-terminal": scenario_perm_terminal,  # решение в терминале → Telegram прибран, решения хука нет
 }
 
 
