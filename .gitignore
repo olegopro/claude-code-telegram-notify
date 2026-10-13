@@ -10,3 +10,6 @@ telegram-notify.env
 # кэш Python (появляется при запуске tests/e2e и mock-telegram)
 __pycache__/
 *.pyc
+
+# личные заметки об окружении (машины, пути, опции) — не для публичного репозитория
+*.local.md

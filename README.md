@@ -45,22 +45,27 @@ Telegram-уведомления для [Claude Code](https://claude.com/claude-c
 - **Не спешит с фоном.** Если turn закончился, но в сессии ещё работают фоновые задачи (`run_in_background`, `Workflow`) — «Завершено» ждёт их реального конца, а не шлёт раньше времени.
 - **Перевод названия** треда на русский и **ссылка Remote Control** на сессию (если включён).
 - **Имя машины** отдельной строкой под папкой проекта (`💻 MacBook Pro`) — один бот на несколько компьютеров, уведомления не путаются (на macOS — `ComputerName` без «<имя>’s », иначе `hostname -s`).
-- **Секреты вне репозитория** — токен и `chat_id` лежат в локальном `~/.claude/telegram-notify.env`, который не коммитится (токены в git не кладём, даже когда репозиторий приватный).
+- **Секреты вне репозитория** — токен и `chat_id` лежат в локальном `~/.claude/telegram-notify.env`, который не коммитится.
 
 ## Установка
 
 Нужны `jq` и `curl` (на macOS: `brew install jq`).
 
-Репозиторий приватный (с 2026-10-13), поэтому ставится из клона — нужен доступ `gh`/git:
+Одной командой:
 
 ```sh
-gh repo clone olegopro/claude-code-telegram-notify   # или git clone https://github.com/olegopro/claude-code-telegram-notify.git
+curl -fsSL https://raw.githubusercontent.com/olegopro/claude-code-telegram-notify/main/install.sh | sh
+```
+
+Или из клона:
+
+```sh
+git clone https://github.com/olegopro/claude-code-telegram-notify.git
 cd claude-code-telegram-notify
 ./install.sh
 ```
 
-> Однострочная установка `curl -fsSL https://raw.githubusercontent.com/olegopro/claude-code-telegram-notify/main/install.sh | sh`
-> работает только пока репозиторий публичен: у приватного `raw.githubusercontent.com` отдаёт 404.
+Обновление из клона: `git pull && ./install.sh` (установщик идемпотентен).
 
 Установщик: кладёт хуки в `~/.claude/hooks/`, регистрирует их в `~/.claude/settings.json` (идемпотентно, с бэкапом `.bak`), создаёт шаблон `~/.claude/telegram-notify.env` и включает уведомления.
 
