@@ -82,6 +82,9 @@ session_title() {
 # Stop приходит через секунды после PostToolUse, а длинный опрос проверяет файл раз в ~5 с:
 # «done» поэтому Stop/prompt не стирают, пока хук жив, — иначе ответ терялся бы (q_clear).
 #
+# Тот же движок обслуживает и запросы разрешений (режим q_mode=perm, подкоманда permission):
+# одно сообщение, три кнопки, решение — allow/deny. Отличия режимов — в p_* и в q_exit.
+#
 # Серия вопросов листается в ОДНОМ сообщении: экран q_idx = 0..n-1 — вопросы, n — «Проверка»
 # (сводка ответов; «Отправить» появляется, когда отвечены все). Состояние каждого вопроса —
 # q_sts[i] = {sel, txt, done}: назад/вперёд ничего не теряют, отметки чекбоксов сохраняются.
@@ -253,9 +256,14 @@ q_next() {
 # «✍️ Свой вариант»: просим ответить на сообщение текстом (force_reply открывает поле ввода)
 q_ask_text() {
   [ -n "$q_prompt" ] && q_bg tg_delete "$q_prompt"
-  q_prompt=$(tg_send_kb '✍️ <b>Напишите свой вариант</b> — ответом на это сообщение.' \
-    '{"force_reply":true,"input_field_placeholder":"Ваш вариант…"}')
-  if [ -n "$q_prompt" ]; then q_pmids="[$q_mid,$q_prompt]"; else q_pmids="[$q_mid]"; fi
+  q_prompt=$(tg_send_kb "${q_prompt_text:-✍️ <b>Напишите свой вариант</b> — ответом на это сообщение.}" \
+    "{\"force_reply\":true,\"input_field_placeholder\":\"${q_prompt_ph:-Ваш вариант…}\"}")
+  # ответ принимается на подсказку; в вопросах — ещё и на само сообщение (q_pm_main=1)
+  if [ -n "$q_prompt" ]; then
+    if [ "$q_pm_main" = 1 ]; then q_pmids="[$q_mid,$q_prompt]"; else q_pmids="[$q_prompt]"; fi
+  else
+    q_pmids="[$q_mid]"
+  fi
 }
 
 # нажата кнопка (ev_cb ev_qi ev_act)
@@ -415,13 +423,15 @@ q_poll() {
     q_seen=$(printf '%s' "$q_seen" | jq -c --argjson u "$ev_uid" '. + [$u]')
     case "$ev_k" in
       stale)
-        tg_cb_answer "$ev_cb" "Этот вопрос уже закрыт"
+        tg_cb_answer "$ev_cb" "Этот запрос уже закрыт"
         tg_edit_kb "$ev_mid" ""
         ;;
-      cb) q_on_click ;;
+      cb)
+        if [ "$q_mode" = perm ]; then p_on_click; else q_on_click; fi
+        ;;
       text)
         ev_text=$(printf '%s' "$q_e" | jq -r '.text')
-        q_on_text
+        if [ "$q_mode" = perm ]; then p_on_text; else q_on_text; fi
         ;;
     esac
     [ "$q_fin" = 1 ] && break
@@ -445,52 +455,79 @@ q_exit() {
   trap - EXIT
   # в журнал (только при флаге отладки): чем закончился вопрос — answered / terminal /
   # timeout / closed; пусто — сигнал (Esc, закрытие сессии)
-  tg_log "question sid=$sid → выход: ${q_end:-сигнал}"
+  tg_log "$q_mode sid=$sid → выход: ${q_end:-сигнал}"
   q_a=""
-  case "$q_end" in
-    answered) q_st="✅ <b>Ответ отправлен</b>"; q_a="$q_answers" ;;
-    terminal) q_st="🖥 <b>Отвечено в терминале</b>"
-              [ -f "$qf" ] && q_a=$(sed -n 's/^done [0-9]* //p' "$qf" | head -1) ;;
-    timeout)  q_st="⏱ <b>Время ожидания вышло</b> — ответьте в терминале" ;;
-    closed)   q_st="➖ <b>Вопрос закрыт</b>" ;;
-    *)        q_st="🚫 <b>Отменено в терминале</b>" ;;
-  esac
+  if [ "$q_mode" = perm ]; then
+    case "$q_end" in
+      answered) if [ "$p_dec" = allow ]; then q_st="✅ <b>Разрешено</b> из Telegram"; else q_st="❌ <b>Отклонено</b> из Telegram"; fi ;;
+      terminal) q_st="🖥 <b>Решено в терминале</b>" ;;
+      timeout)  q_st="⏱ <b>Время ожидания вышло</b> — решите в терминале" ;;
+      closed)   q_st="➖ <b>Запрос закрыт</b>" ;;
+      *)        q_st="🚫 <b>Отменено в терминале</b>" ;;
+    esac
+  else
+    case "$q_end" in
+      answered) q_st="✅ <b>Ответ отправлен</b>"; q_a="$q_answers" ;;
+      terminal) q_st="🖥 <b>Отвечено в терминале</b>"
+                [ -f "$qf" ] && q_a=$(sed -n 's/^done [0-9]* //p' "$qf" | head -1) ;;
+      timeout)  q_st="⏱ <b>Время ожидания вышло</b> — ответьте в терминале" ;;
+      closed)   q_st="➖ <b>Вопрос закрыт</b>" ;;
+      *)        q_st="🚫 <b>Отменено в терминале</b>" ;;
+    esac
+  fi
   # остаётся в чате как отметка; снимется со следующим действием в терминале (drop_messages)
   [ -n "$q_mid" ] && printf '%s\n' "$q_mid" >> "/tmp/claude_notif_msg_${sid}"
   [ -n "$q_cpid" ] && kill "$q_cpid" 2>/dev/null
   # летящая правка экрана должна завершиться до итогового текста, иначе порядок не гарантирован
   [ -n "$q_edpid" ] && wait "$q_edpid" 2>/dev/null
   rm -f "$qf" "$q_evf" "$q_respf"
+  if [ "$q_mode" = perm ]; then
+    q_body=$(p_text "$q_st" "$p_why")
+  else
+    q_body=$(q_summary "$q_st" "$q_a")
+  fi
   if [ "$q_end" = answered ]; then
     # правка уходит в фоне со своими дескрипторами: хук должен завершиться сразу —
     # Claude Code применит решение только после выхода процесса
     { [ -n "$q_prompt" ] && tg_delete "$q_prompt"
-      tg_edit "$q_mid" "$(q_summary "$q_st" "$q_a")"
+      tg_edit "$q_mid" "$q_body"
       q_confirm; } >/dev/null 2>&1 &
   else
     [ -n "$q_prompt" ] && q_bg tg_delete "$q_prompt"
-    tg_edit "$q_mid" "$(q_summary "$q_st" "$q_a")"
+    tg_edit "$q_mid" "$q_body"
     q_confirm
   fi
 }
 
-ask_question() {
-  [ -n "$sid" ] || return 0
-  tg_enabled || return 0
-  [ -f "$HOME/.claude/telegram-question.on" ] || return 0
-  [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] || return 0
+# ── общие шаги диалогов с кнопками (вопросы и разрешения) ──────────────────────────────
 
-  q_qs=$(printf '%s' "$in" | jq -c '.tool_input.questions // empty' 2>/dev/null)
-  q_n=$(printf '%s' "$q_qs" | jq 'length' 2>/dev/null)
-  case "$q_n" in ''|*[!0-9]*|0) return 0 ;; esac
+# включён ли диалог: общий выключатель, флаг режима ($1), секреты. 1 → выйти молча
+q_gate() {
+  [ -n "$sid" ] || return 1
+  tg_enabled || return 1
+  [ -f "$HOME/.claude/$1" ] || return 1
+  [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] || return 1
+  return 0
+}
 
+# отпечаток запроса: имя инструмента + его ввод (у вопросов — только questions: PostToolUse
+# приходит уже с добавленными answers). По нему PostToolUse узнаёт «свой» запрос и не
+# закрывает ожидающий диалог из-за параллельного вызова другого инструмента.
+q_fingerprint() {
+  printf '%s' "$1" | jq -cS '{t: (.tool_name // ""),
+    i: (if .tool_name == "AskUserQuestion" then (.tool_input.questions // []) else (.tool_input // {}) end)}' 2>/dev/null \
+    | cksum | cut -d' ' -f1
+}
+
+# подготовка ожидающего диалога: повторный вызов, идентификаторы, шапка, состояние цикла.
+# Возвращает 1, если диалог уже ведёт живой хук этой сессии.
+q_common() {
   qf="/tmp/claude_tg_q_${sid}"
-  # повторный вызов на тот же вопрос: первый хук ещё жив — второй не нужен
+  # повторный вызов на тот же запрос: первый хук ещё жив — второй не нужен
   if [ -f "$qf" ]; then
     read -r q_st q_opid _ < "$qf"
-    [ "$q_st" = pending ] && kill -0 "$q_opid" 2>/dev/null && return 0
+    if [ "$q_st" = pending ] && kill -0 "$q_opid" 2>/dev/null; then return 1; fi
   fi
-
   q_rid=$(od -An -N4 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
   [ -n "$q_rid" ] || q_rid=$(printf '%s%s' "$sid" "$$" | cksum | cut -d' ' -f1)
   proj=$(basename "${CLAUDE_PROJECT_DIR:-$PWD}")
@@ -501,29 +538,45 @@ ask_question() {
   # названия ещё нет (свежая сессия) — session_title вернул папку, а она и так в строке 📁
   [ "$q_title" = "$proj" ] && q_title=""
   q_rc=$(tg_rc_line "$tp")
+  q_fp=$(q_fingerprint "$in")
   q_idx=0; q_rev=0; q_answers='{}'; q_seen='[]'; q_off=''; q_fin=0; q_end=''
-  q_sts=$(jq -nc --argjson n "$q_n" '[range(0; $n) | {sel: [], txt: "", done: false}]')
-  q_prompt=''; q_mid=''; q_pmids='[]'
+  q_prompt=''; q_mid=''; q_pmids='[]'; q_pm_main=1
   q_evf="/tmp/claude_tg_q_${sid}.ev.$$"
   q_respf="/tmp/claude_tg_q_${sid}.resp.$$"
   q_dirty=0; q_cpid=''; q_edpid=''
   # чужое обновление старше этого возраста считаем мёртвым (хук столько не живёт)
   q_maxage=$(( ${TELEGRAM_QUESTION_TIMEOUT:-3300} + 600 ))
+  return 0
+}
 
-  # файл состояния — ДО отправки: Notification permission_prompt (через ~6 с) увидит его
-  # и не продублирует вопрос сообщением «Нужно разрешение»
-  printf 'pending %s %s\n' "$$" "$q_rid" > "$qf"
-  q_load
-  q_r=$(q_render)
-  q_mid=$(tg_send_kb "$(printf '%s' "$q_r" | jq -r .text)" "$(printf '%s' "$q_r" | jq -c .keyboard)")
+# отправить первое сообщение ($1 = HTML-текст, $2 = клавиатура JSON) и записать состояние.
+# Файл состояния — ДО отправки: Notification permission_prompt (через ~6 с) увидит его
+# и не продублирует диалог сообщением «Нужно разрешение». 1 → не отправлено, выйти молча.
+q_send_first() {
+  printf 'pending %s %s %s\n' "$$" "$q_rid" "$q_fp" > "$qf"
+  q_mid=$(tg_send_kb "$1" "$2")
   if [ -z "$q_mid" ]; then
-    tg_log "question sid=$sid: вопрос не отправлен — остаётся диалог в терминале"
+    tg_log "$q_mode sid=$sid: сообщение не отправлено — остаётся диалог в терминале"
     rm -f "$qf"
-    return 0
+    return 1
   fi
   q_pmids="[$q_mid]"
-  tg_log "question sid=$sid rid=$q_rid mid=$q_mid n=$q_n → ждём ответ в Telegram"
+  [ "$q_pm_main" = 1 ] || q_pmids='[]'
+  tg_log "$q_mode sid=$sid rid=$q_rid mid=$q_mid → ждём решение в Telegram"
+  return 0
+}
 
+# вывести решение хука в stdout; для тестов — ещё и в файл TELEGRAM_DECISION_FILE (сам хук
+# пишет его, без конвейера `| tee` в команде: через конвейер sh -c гибнет по SIGTERM раньше
+# хука, и Claude Code добивает группу, не дав хуку прибрать сообщение в Telegram)
+q_emit() {
+  # файл — первым: получив решение, Claude Code может тут же прибить хук
+  [ -n "$TELEGRAM_DECISION_FILE" ] && printf '%s\n' "$1" > "$TELEGRAM_DECISION_FILE"
+  printf '%s\n' "$1"
+}
+
+# цикл ожидания: опрос Telegram, пока не решено (q_fin) / закрыто / таймаут / сигнал
+q_wait() {
   q_deadline=$(( $(date +%s) + ${TELEGRAM_QUESTION_TIMEOUT:-3300} ))
   trap 'q_exit' EXIT
   trap 'exit 0' HUP INT TERM
@@ -541,6 +594,20 @@ ask_question() {
     # очереди) — не крутить цикл вхолостую
     [ $(( $(date +%s) - q_t0 )) -ge 1 ] || sleep "${TELEGRAM_QUESTION_POLL:-1}"
   done
+}
+
+ask_question() {
+  q_gate telegram-question.on || return 0
+  q_qs=$(printf '%s' "$in" | jq -c '.tool_input.questions // empty' 2>/dev/null)
+  q_n=$(printf '%s' "$q_qs" | jq 'length' 2>/dev/null)
+  case "$q_n" in ''|*[!0-9]*|0) return 0 ;; esac
+  q_mode=question
+  q_common || return 0
+  q_sts=$(jq -nc --argjson n "$q_n" '[range(0; $n) | {sel: [], txt: "", done: false}]')
+  q_load
+  q_r=$(q_render)
+  q_send_first "$(printf '%s' "$q_r" | jq -r .text)" "$(printf '%s' "$q_r" | jq -c .keyboard)" || return 0
+  q_wait
 
   if [ "$q_fin" = 1 ]; then
     q_end=answered
@@ -548,9 +615,108 @@ ask_question() {
       . as $qs | [range(0; length) as $i | select($st[$i].done)
                   | {key: $qs[$i].question, value: ans($qs[$i]; $st[$i])}] | from_entries')
     # решение хука: allow + исходный ввод с ответами (updatedInput заменяет ввод целиком)
-    printf '%s' "$in" | jq -c --argjson a "$q_answers" \
+    q_dec=$(printf '%s' "$in" | jq -c --argjson a "$q_answers" \
       '{hookSpecificOutput: {hookEventName: "PermissionRequest",
-        decision: {behavior: "allow", updatedInput: (.tool_input + {answers: $a})}}}'
+        decision: {behavior: "allow", updatedInput: (.tool_input + {answers: $a})}}}')
+    q_emit "$q_dec"
+  fi
+  exit 0
+}
+
+# ── разрешения на инструменты кнопками (подкоманда permission) ─────────────────────────────
+# Обычный запрос разрешения (Bash, Write, Edit, MCP…): в Telegram уходит инструмент и команда
+# с кнопками «Разрешить / Отклонить / Отклонить с причиной». Любой сбой, таймаут или ответ
+# в терминале — хук ничего не решает, диалог остаётся как есть: «разрешить» никогда не
+# выдаётся по умолчанию. Включается отдельным флагом ~/.claude/telegram-permission.on.
+
+# текст сообщения: $1 = первая строка (статус / заголовок), $2 = причина отказа (может быть пусто)
+p_text() {
+  printf '%s' "$in" | jq -r --arg st "$1" --arg why "$2" --arg title "$q_title" \
+    --arg proj "$q_proj" --arg host "$q_host" --arg rc "$q_rc" "$q_jqdefs"'
+    def code($s): "<pre>" + ($s | cut(700) | esc) + "</pre>";
+    (.tool_name // "") as $t
+    | (.tool_input // {}) as $i
+    | $st
+      + (if $title != "" then "\n\n📋 <b>" + ($title | esc) + "</b>" else "" end)
+      + "\n\n📁 " + ($proj | esc) + "\n💻 " + ($host | esc)
+      + "\n\n<b>" + ($t | cut(80) | esc) + "</b>"
+      + ( if $t == "Bash" then
+            "\n" + code($i.command // "")
+            + (if ($i.description // "") != "" then "\n<i>" + ($i.description | cut(240) | esc) + "</i>" else "" end)
+          elif $t == "Write" then
+            "\n📄 " + (($i.file_path // "") | esc)
+            + (if ($i.content // "") != "" then "\n" + code($i.content) else "" end)
+          elif ($t == "Edit" or $t == "MultiEdit" or $t == "NotebookEdit") then
+            "\n📄 " + (($i.file_path // $i.notebook_path // "") | esc)
+            + (if ($i.old_string // "") != "" then "\n" + code("− " + $i.old_string + "\n+ " + ($i.new_string // "")) else "" end)
+          elif $t == "WebFetch" then "\n🌐 " + (($i.url // "") | esc)
+          elif $t == "WebSearch" then "\n🔎 " + (($i.query // "") | esc)
+          else "\n" + code($i | tojson) end )
+      + (if $why != "" then "\n\n💬 " + ($why | cut(300) | esc) else "" end)
+      + $rc'
+}
+
+p_keyboard() {
+  jq -nc --arg rid "$q_rid" '{inline_keyboard: [
+    [{text: "✅ Разрешить", callback_data: ("q" + $rid + ":0:a")},
+     {text: "❌ Отклонить", callback_data: ("q" + $rid + ":0:n")}],
+    [{text: "✍️ Отклонить с причиной", callback_data: ("q" + $rid + ":0:r")}]]}'
+}
+
+# нажата кнопка разрешения (ev_cb ev_qi ev_act)
+p_on_click() {
+  if [ "$ev_qi" != "0" ]; then tg_cb_answer "$ev_cb"; return 0; fi
+  case "$ev_act" in
+    a) tg_cb_answer "$ev_cb" "✓ Разрешено"; p_dec=allow; q_fin=1 ;;
+    n) tg_cb_answer "$ev_cb" "✓ Отклонено"; p_dec=deny; p_why=""; q_fin=1 ;;
+    r)
+      tg_cb_answer "$ev_cb" "Напишите причину в чат"
+      q_ask_text
+      ;;
+    *) tg_cb_answer "$ev_cb" ;;
+  esac
+}
+
+# причина отказа ответом на подсказку (ev_text ev_mid)
+p_on_text() {
+  [ -n "$ev_text" ] || return 0
+  q_bg tg_delete "$ev_mid"
+  if [ -n "$q_prompt" ]; then
+    q_bg tg_delete "$q_prompt"
+    q_prompt=''
+    q_pmids='[]'
+  fi
+  p_dec=deny
+  p_why="$ev_text"
+  q_fin=1
+}
+
+ask_permission() {
+  q_gate telegram-permission.on || return 0
+  # вопросы ведёт question; план (ExitPlanMode) со своим диалогом — только в терминале
+  case "$(printf '%s' "$in" | jq -r '.tool_name // ""' 2>/dev/null)" in
+    ''|AskUserQuestion|ExitPlanMode) return 0 ;;
+  esac
+  q_mode=perm
+  q_common || return 0
+  p_dec=''; p_why=''
+  q_pm_main=0
+  q_prompt_text='✍️ <b>Напишите причину отказа</b> — ответом на это сообщение. Claude увидит её.'
+  q_prompt_ph='Причина отказа…'
+  q_send_first "$(p_text '🔔 <b>Нужно разрешение</b>' '')" "$(p_keyboard)" || return 0
+  q_wait
+
+  if [ "$q_fin" = 1 ]; then
+    q_end=answered
+    if [ "$p_dec" = allow ]; then
+      q_emit '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+    else
+      if [ -n "$p_why" ]; then q_msg="The user denied this request in Telegram: $p_why"
+      else q_msg="The user denied this request in Telegram."; fi
+      q_dec=$(jq -nc --arg m "$q_msg" \
+        '{hookSpecificOutput: {hookEventName: "PermissionRequest", decision: {behavior: "deny", message: $m}}}')
+      q_emit "$q_dec"
+    fi
   fi
   exit 0
 }
@@ -681,16 +847,26 @@ case "$cmd" in
     ask_question
     ;;
 
+  permission)
+    # PermissionRequest (любой инструмент): запрос разрешения → Telegram с кнопками.
+    # Как и question, печатает в stdout только решение хука; нет флага — молча выходит.
+    ask_permission
+    ;;
+
   answered)
-    # PostToolUse (matcher=AskUserQuestion): вопрос отвечен — в терминале, из Telegram или
-    # через Remote Control. Если question ещё ждёт, передаём ему ответы: он прибёрет сообщение.
-    # Файла нет — вопрос уже закрыт самим question (ответ был из Telegram), делать нечего.
+    # PostToolUse (любой инструмент): запрос отвечен — в терминале, из Telegram или через
+    # Remote Control. Если question/permission ещё ждёт, сообщаем ему: он прибёрет сообщение
+    # (у вопросов — с ответами). Узнаём «свой» запрос по отпечатку инструмента и ввода:
+    # параллельный вызов другого инструмента ожидающий диалог закрывать не должен.
+    # Файла нет — диалог уже закрыт самим хуком (ответ был из Telegram), делать нечего.
     [ -n "$sid" ] || exit 0
     qf="/tmp/claude_tg_q_${sid}"
     [ -f "$qf" ] || exit 0
+    read -r qa_st qa_pid _ qa_fp < "$qf"
+    [ "$qa_st" = "pending" ] || exit 0
+    if [ -n "$qa_fp" ] && [ "$qa_fp" != "$(q_fingerprint "$in")" ]; then exit 0; fi
     a=$(printf '%s' "$in" | jq -c '.tool_response.answers // {}' 2>/dev/null)
     [ -n "$a" ] || a='{}'
-    read -r _ qa_pid _ < "$qf"
     printf 'done %s %s\n' "$qa_pid" "$a" > "$qf"
     ;;
 

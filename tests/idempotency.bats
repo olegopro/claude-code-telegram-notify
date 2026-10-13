@@ -20,22 +20,43 @@ teardown() {
   WITH_DEBUG=1 sh "$REPO_ROOT/install.sh"
   WITH_DEBUG=1 sh "$REPO_ROOT/install.sh"
   # с 2026-10-10 регистрация — один скрипт плюс подкоманда
-  for sub in prompt stop ask permit end question answered; do
+  for sub in prompt stop ask permit end question permission answered; do
     n=$(jq --arg s "tg-notify.sh\" $sub" '[.hooks[]?[]?.hooks[]?|select((.command//"")|contains($s))]|length' "$TEST_DIR/settings.json")
     [ "$n" -eq 1 ]
   done
 }
 
-@test "question hooks are bound to AskUserQuestion only" {
+@test "question hooks are bound to AskUserQuestion, permission and answered to all tools" {
   sh "$REPO_ROOT/install.sh"
-  # PermissionRequest: ответ из Telegram; PostToolUse: сигнал «отвечено», чтобы прибрать чат
+  # PermissionRequest: вопросы — только AskUserQuestion, разрешения — любой инструмент (matcher "")
   m=$(jq -r '[.hooks.PermissionRequest[]? | select(.hooks[0].command | contains("tg-notify.sh\" question")) | .matcher] | first' "$TEST_DIR/settings.json")
   [ "$m" = "AskUserQuestion" ]
+  m=$(jq -r '[.hooks.PermissionRequest[]? | select(.hooks[0].command | contains("tg-notify.sh\" permission")) | .matcher] | first' "$TEST_DIR/settings.json")
+  [ "$m" = "" ]
+  # PostToolUse: сигнал «отвечено» нужен по любому инструменту (разрешения решаются не только у вопросов)
   m=$(jq -r '[.hooks.PostToolUse[]? | select(.hooks[0].command | contains("tg-notify.sh\" answered")) | .matcher] | first' "$TEST_DIR/settings.json")
-  [ "$m" = "AskUserQuestion" ]
+  [ "$m" = "" ]
   # таймаут хука больше внутреннего (3300 с): сообщение успевает закрыться само
   t=$(jq -r '[.hooks.PermissionRequest[]?.hooks[]? | select(.command | contains("question")) | .timeout] | first' "$TEST_DIR/settings.json")
   [ "$t" -gt 3300 ]
+}
+
+@test "upgrade: answered registered for AskUserQuestion only is widened, not duplicated" {
+  # установка прежней версии: PostToolUse только по AskUserQuestion
+  printf '%s' '{"hooks":{"PostToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"sh \"'"$TEST_DIR"'/hooks/tg-notify.sh\" answered"}]}]}}' > "$TEST_DIR/settings.json"
+  sh "$REPO_ROOT/install.sh"
+  sh "$REPO_ROOT/install.sh"
+  n=$(jq '[.hooks.PostToolUse[]?.hooks[]? | select((.command // "") | contains("tg-notify.sh\" answered"))] | length' "$TEST_DIR/settings.json")
+  [ "$n" -eq 1 ]
+  m=$(jq -r '[.hooks.PostToolUse[]? | select(.hooks[0].command | contains("tg-notify.sh\" answered")) | .matcher] | first' "$TEST_DIR/settings.json")
+  [ "$m" = "" ]
+}
+
+@test "permission buttons are OFF by default and ENABLE_PERMISSIONS=1 turns them on" {
+  sh "$REPO_ROOT/install.sh"
+  [ ! -f "$TEST_DIR/telegram-permission.on" ]
+  ENABLE_PERMISSIONS=1 sh "$REPO_ROOT/install.sh"
+  [ -f "$TEST_DIR/telegram-permission.on" ]
 }
 
 @test "question flag is created, and ENABLE_QUESTIONS=0 skips it" {

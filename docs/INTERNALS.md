@@ -14,7 +14,7 @@
 
 | Файл | Что внутри |
 |---|---|
-| `hooks/tg-notify.sh` | один скрипт, ветвление по подкоманде: `prompt` `stop` `permit` `ask` `chrome` `question` `answered` `end` `debug` |
+| `hooks/tg-notify.sh` | один скрипт, ветвление по подкоманде: `prompt` `stop` `permit` `ask` `chrome` `question` `permission` `answered` `end` `debug` |
 | `hooks/tg-notify-lib.sh` | примитивы Bot API: `tg_send` `tg_send_kb` `tg_edit` `tg_edit_kb` `tg_cb_answer` `tg_updates` `tg_delete` `tg_api`, `tg_host`, `tg_esc`, `tg_log` |
 | `install.sh` / `uninstall.sh` | регистрация хуков в `settings.json` (идемпотентно, с бэкапом) |
 | `tests/*.bats` | установщик и вопросы против mock Bot API |
@@ -31,7 +31,7 @@
 | `claude_tg_q_<sid>.ev.<pid>`, `.resp.<pid>` | пачка событий и ответ `getUpdates` текущего хука (убираются на выходе) |
 
 Флаги и настройки: `~/.claude/telegram-notify.on` (общий выключатель), `telegram-question.on`
-(вопросы кнопками), `telegram-notify.debug` (журнал в `/tmp/claude_notif_debug.log`),
+(вопросы кнопками), `telegram-permission.on` (разрешения кнопками, по умолчанию выключено), `telegram-notify.debug` (журнал в `/tmp/claude_notif_debug.log`),
 `telegram-min-seconds`; переменные — в README, раздел «Настройка».
 
 ## 2. Вопросы `AskUserQuestion`: как это работает
@@ -62,6 +62,23 @@
 
 Отсюда конструкция: ждущий хук сам следит за состоянием (`claude_tg_q_<sid>`), а `PostToolUse`
 (`answered`), `Stop`, `UserPromptSubmit`, `SessionEnd` только отмечают, что вопрос закрыт.
+
+**Обычные запросы разрешений (подкоманда `permission`).** Тот же `PermissionRequest`, без matcher:
+вход — `tool_name` и `tool_input` (без `tool_use_id`), выход — `decision.behavior` `allow`/`deny`
+(`deny` ещё и `message` — её читает модель). Что важно:
+
+- **«Свой» запрос узнаётся по отпечатку** (`q_fingerprint`: имя инструмента + канонический `tool_input`,
+  `jq -S`), потому что `PostToolUse` приходит без связи с запросом, а инструменты бывают параллельными.
+  У `AskUserQuestion` в отпечаток входят только `questions`: `PostToolUse` приходит уже с `answers`.
+- Для `PostToolUse` по любому инструменту хук `answered` — синхронный (порядок относительно `Stop`
+  важен) и дешёвый: нет файла состояния — выход.
+- **Решения по умолчанию нет**: сбой, таймаут, сигнал, недоступный Telegram — ни `allow`, ни `deny`.
+- Ответ **обычным reply** на сообщение-запрос ничего не решает (только ответ на подсказку «причина»):
+  «ок» нельзя трактовать ни как согласие, ни как отказ.
+- Получив `deny`, Claude Code **может прибить хук сразу** — всё, что хук делает после вывода решения,
+  может не успеть; поэтому файл решения (`TELEGRAM_DECISION_FILE`) пишется раньше stdout.
+- **Команда хука не должна быть конвейером** (`… | tee`): `sh -c` умирает по SIGTERM раньше хука, и
+  Claude Code добивает группу, не дав хуку прибрать сообщение (Esc → «зависшие» кнопки).
 
 **Чего нет.** В `claude -p` инструмента `AskUserQuestion` модели не предлагается вообще (там и
 вопросов нет). Официальные Channels (плагин Telegram, `--channels`) пересылают разрешения на
@@ -136,6 +153,8 @@
 - **Stop приходит через секунды после PostToolUse**, а ждущий хук проверяет состояние раз в ~5 с:
   `Stop`/`prompt` не стирают состояние `done`, пока хук жив (`q_clear`), иначе ответ из терминала
   терялся бы, и сообщение получало «Вопрос закрыт» вместо ответа.
+- **Один диалог на сессию.** Состояние (`claude_tg_q_<sid>`) одно на сессию: два одновременных запроса в
+  одной сессии (параллельные инструменты) — кнопки получает первый, второй остаётся терминалу.
 - **Двойной тап.** Кнопки привязаны к номеру экрана; запоздавший тап по устаревшему экрану
   отклоняется («Экран уже обновился»), иначе «Вперёд» дважды перепрыгивал бы вопрос.
 - **Решение хука печатается в stdout** — единственная подкоманда с выводом. Итоговая правка
@@ -163,6 +182,7 @@
 bats tests/                                  # установщик + вопросы против mock (нужны bats, jq, python3)
 PATH=/путь/к/шиму-sh-dash:$PATH bats tests/   # то же под dash
 python3 tests/e2e/tui-question.py             # сквозной стенд на живом Claude Code (haiku, несколько запросов)
+python3 tests/e2e/tui-question.py perm-allow perm-deny --claude ~/.local/bin/claude   # разрешения (режим default)
 python3 tests/e2e/tui-question.py terminal esc --keep --claude ~/.local/bin/claude
 ```
 
@@ -178,8 +198,10 @@ python3 tests/e2e/tui-question.py terminal esc --keep --claude ~/.local/bin/clau
 - `claude` в PATH может быть функцией оболочки — передавать `--claude <путь к бинарнику>`;
 - через `--setting-sources project` не подхватывается блок `env` пользовательских настроек —
   прокси добавляется флагом `--proxy-from-settings`;
-- сценарий `esc` изредка срывается (TUI не доставляет сигнал) — повторить; стабильное падение
-  значит, что поведение Claude Code изменилось.
+- команда хука в настройках стенда — **простая, без конвейера**, как в рабочей регистрации: через
+  `| tee` сценарий `esc` ложно падал (см. §2); решение хук пишет в файл сам (`TELEGRAM_DECISION_FILE`);
+- сценарии `perm-*` запускают Claude Code в режиме `default`, чтобы инструмент просил разрешение;
+  команда с перенаправлением в файл — не «безопасная», её разрешение запрашивается всегда.
 
 Живая проверка на настоящем боте без Claude Code — команда из README, раздел «Проверка без Claude Code».
 

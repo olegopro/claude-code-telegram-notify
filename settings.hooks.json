@@ -14,10 +14,11 @@
       { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" permit" } ] }
     ],
     "PermissionRequest": [
-      { "matcher": "AskUserQuestion", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" question", "timeout": 3600 } ] }
+      { "matcher": "AskUserQuestion", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" question", "timeout": 3600 } ] },
+      { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" permission", "timeout": 3600 } ] }
     ],
     "PostToolUse": [
-      { "matcher": "AskUserQuestion", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" answered" } ] }
+      { "matcher": "", "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" answered" } ] }
     ],
     "SessionEnd": [
       { "hooks": [ { "type": "command", "command": "sh \"$HOME/.claude/hooks/tg-notify.sh\" end" } ] }

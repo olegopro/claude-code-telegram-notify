@@ -14,7 +14,7 @@ setup() {
   export HOME="$TEST_DIR/home"
   mkdir -p "$HOME/.claude/hooks"
   cp "$REPO_ROOT"/hooks/tg-notify*.sh "$HOME/.claude/hooks/"
-  touch "$HOME/.claude/telegram-notify.on" "$HOME/.claude/telegram-question.on"
+  touch "$HOME/.claude/telegram-notify.on" "$HOME/.claude/telegram-question.on" "$HOME/.claude/telegram-permission.on"
   HOOK="$HOME/.claude/hooks/tg-notify.sh"
   # разработческая машина может ходить через прокси — mock на 127.0.0.1 идёт напрямую
   unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY
@@ -57,6 +57,13 @@ start_question() {
       '{session_id: $sid, hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: {questions: $q}}' \
       | sh "$HOOK" question > "$TEST_DIR/out.$1" 2> "$TEST_DIR/err.$1"
     echo done > "$TEST_DIR/done.$1" ) 3>&- &
+}
+
+# PostToolUse (подкоманда answered): $1 = sid, $2 = tool_name, $3 = tool_input (JSON), $4 = tool_response (JSON)
+post_tool_use() {
+  jq -nc --arg sid "$1" --arg t "$2" --argjson i "$3" --argjson r "$4" \
+    '{session_id: $sid, hook_event_name: "PostToolUse", tool_name: $t, tool_input: $i, tool_response: $r}' \
+    | sh "$HOOK" answered
 }
 
 # id первого сообщения бота
@@ -314,8 +321,7 @@ answer_of() { jq -r --arg q "$2" '.hookSpecificOutput.decision.updatedInput.answ
   wait_for msgs_ge 1
   mid=$(first_mid)
   [ -f /tmp/claude_tg_q_t-term ]
-  printf '%s' '{"session_id":"t-term","hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_response":{"answers":{"Какой формат?":"Кратко"}}}' \
-    | sh "$HOOK" answered
+  post_tool_use t-term AskUserQuestion "{\"questions\":$Q_SINGLE}" '{"answers":{"Какой формат?":"Кратко"}}'
   wait_for finished t-term
   # решения нет — диалог в терминале уже закрыт самим пользователем
   [ ! -s "$TEST_DIR/out.t-term" ]
@@ -420,7 +426,7 @@ answer_of() { jq -r --arg q "$2" '.hookSpecificOutput.decision.updatedInput.answ
     '{callback_query: {id: "stale1", from: {id: 42}, message: {message_id: 101, chat: {id: 42}, date: 1000}, data: "qdeadbeef:0:o0"}}')" >/dev/null
   start_question t-stale "$Q_SINGLE"
   wait_for state_is '[.answers[] | select(.id == "stale1")] | length' 1
-  [ "$(mock_state | jq -r '.answers[] | select(.id == "stale1") | .text')" = "Этот вопрос уже закрыт" ]
+  [ "$(mock_state | jq -r '.answers[] | select(.id == "stale1") | .text')" = "Этот запрос уже закрыт" ]
   [ "$(mock_state | jq '.messages[] | select(.message_id == 101) | .reply_markup.inline_keyboard | length')" -eq 0 ]
 }
 
@@ -550,10 +556,137 @@ answer_of() { jq -r --arg q "$2" '.hookSpecificOutput.decision.updatedInput.answ
   start_question t-race "$Q_SINGLE"
   wait_for msgs_ge 1
   mid=$(first_mid)
-  printf '%s' '{"session_id":"t-race","hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","tool_response":{"answers":{"Какой формат?":"Кратко"}}}' \
-    | sh "$HOOK" answered
+  post_tool_use t-race AskUserQuestion "{\"questions\":$Q_SINGLE}" '{"answers":{"Какой формат?":"Кратко"}}'
   printf '%s' '{"session_id":"t-race","hook_event_name":"Stop"}' | sh "$HOOK" stop
   wait_for finished t-race
   wait_for msg_has "$mid" "Отвечено в терминале"
   msg_has "$mid" "→ Кратко"
+}
+
+# ── разрешения на инструменты кнопками (подкоманда permission) ───────────────────────────────
+
+PERM_BASH='{"tool_name":"Bash","tool_input":{"command":"rm -rf <build> && echo \"done\" & ls","description":"Clean build"}}'
+
+# запустить хук permission в фоне: $1 = session_id, $2 = JSON {tool_name, tool_input}
+start_perm() {
+  ( jq -nc --arg sid "$1" --argjson t "$2" '{session_id: $sid, hook_event_name: "PermissionRequest"} + $t' \
+      | sh "$HOOK" permission > "$TEST_DIR/out.$1" 2> "$TEST_DIR/err.$1"
+    echo done > "$TEST_DIR/done.$1" ) 3>&- &
+}
+# поле decision из вывода хука
+perm_of() { jq -r ".hookSpecificOutput.decision.$2" "$TEST_DIR/out.$1"; }
+
+@test "permission: Allow returns allow; the message shows the tool and the escaped command" {
+  start_perm t-allow "$PERM_BASH"
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  msg_has "$mid" "Нужно разрешение"
+  msg_has "$mid" "<b>Bash</b>"
+  msg_has "$mid" "rm -rf &lt;build&gt; &amp;&amp; echo"
+  msg_has "$mid" "Clean build"
+  mock_state | jq -e --argjson m "$mid" '.messages[] | select(.message_id == $m) | .text | contains("━") | not' >/dev/null
+  tap "$mid" "Разрешить"
+  wait_for finished t-allow
+  [ "$(jq -r '.hookSpecificOutput.hookEventName' "$TEST_DIR/out.t-allow")" = "PermissionRequest" ]
+  [ "$(perm_of t-allow behavior)" = "allow" ]
+  wait_for msg_has "$mid" "Разрешено"
+  [ "$(mock_state | jq --argjson m "$mid" '.messages[] | select(.message_id == $m) | .reply_markup.inline_keyboard | length')" -eq 0 ]
+}
+
+@test "permission: Deny returns deny with a message for Claude" {
+  start_perm t-deny "$PERM_BASH"
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  tap "$mid" "❌ Отклонить"
+  wait_for finished t-deny
+  [ "$(perm_of t-deny behavior)" = "deny" ]
+  [[ "$(perm_of t-deny message)" == *"denied"* ]]
+  wait_for msg_has "$mid" "Отклонено"
+}
+
+@test "permission: Deny with a reason passes the typed text to Claude" {
+  start_perm t-why "$PERM_BASH"
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  tap "$mid" "с причиной"
+  wait_for msgs_ge 2
+  prompt=$(mock_state | jq -r '.messages[1].message_id')
+  [ "$(mock_state | jq -r '.messages[1].reply_markup.force_reply')" = "true" ]
+  mock_post /_text "$(jq -nc --argjson r "$prompt" '{text: "Сначала сделай бэкап", reply_to: $r}')" >/dev/null
+  wait_for finished t-why
+  [ "$(perm_of t-why behavior)" = "deny" ]
+  [[ "$(perm_of t-why message)" == *"Сначала сделай бэкап"* ]]
+  wait_for msg_has "$mid" "Сначала сделай бэкап"
+}
+
+@test "permission: a plain reply to the request is NOT taken as an answer" {
+  start_perm t-reply "$PERM_BASH"
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  # «ок» ответом на сообщение не должно ни разрешать, ни отклонять
+  mock_post /_text "$(jq -nc --argjson r "$mid" '{text: "ок", reply_to: $r}')" >/dev/null
+  sleep 1.2
+  [ ! -f "$TEST_DIR/done.t-reply" ]
+  tap "$mid" "Разрешить"
+  wait_for finished t-reply
+  [ "$(perm_of t-reply behavior)" = "allow" ]
+}
+
+@test "permission: AskUserQuestion and plan approval are left to their own flows" {
+  start_perm t-skipq '{"tool_name":"AskUserQuestion","tool_input":{"questions":[]}}'
+  wait_for finished t-skipq
+  [ ! -s "$TEST_DIR/out.t-skipq" ]
+  start_perm t-skipp '{"tool_name":"ExitPlanMode","tool_input":{"plan":"x"}}'
+  wait_for finished t-skipp
+  [ ! -s "$TEST_DIR/out.t-skipp" ]
+  [ "$(mock_state | jq '.messages | length')" -eq 0 ]
+}
+
+@test "permission: disabled by default (no flag) — silent, dialog untouched" {
+  rm "$HOME/.claude/telegram-permission.on"
+  start_perm t-poff "$PERM_BASH"
+  wait_for finished t-poff
+  [ ! -s "$TEST_DIR/out.t-poff" ]
+  [ "$(mock_state | jq '.messages | length')" -eq 0 ]
+}
+
+@test "permission: timeout gives no decision — never allows by default" {
+  export TELEGRAM_QUESTION_TIMEOUT=2
+  start_perm t-ptime "$PERM_BASH"
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  wait_for finished t-ptime
+  [ ! -s "$TEST_DIR/out.t-ptime" ]
+  wait_for msg_has "$mid" "Время ожидания вышло"
+}
+
+@test "permission: PostToolUse of the same call closes it; another tool's PostToolUse does not" {
+  start_perm t-fp "$PERM_BASH"
+  wait_for msgs_ge 1
+  mid=$(first_mid)
+  # параллельный вызов другого инструмента — ожидающее разрешение трогать нельзя
+  post_tool_use t-fp Read '{"file_path":"/etc/hosts"}' '{}'
+  sleep 1.2
+  [ ! -f "$TEST_DIR/done.t-fp" ]
+  # тот же вызов (ключи в другом порядке) — решено в терминале
+  post_tool_use t-fp Bash '{"description":"Clean build","command":"rm -rf <build> && echo \"done\" & ls"}' '{}'
+  wait_for finished t-fp
+  [ ! -s "$TEST_DIR/out.t-fp" ]
+  wait_for msg_has "$mid" "Решено в терминале"
+}
+
+@test "permission: the generic Notification is suppressed while the request is pending" {
+  start_perm t-pdup "$PERM_BASH"
+  wait_for msgs_ge 1
+  printf '%s' '{"session_id":"t-pdup","hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission"}' \
+    | sh "$HOOK" ask
+  [ "$(mock_state | jq '.messages | length')" -eq 1 ]
+}
+
+@test "ask notification uses the new header: no strip, machine on its own line" {
+  printf '%s' '{"session_id":"t-ask","hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission"}' \
+    | sh "$HOOK" ask
+  mid=$(first_mid)
+  msg_has "$mid" "Нужно разрешение"
+  mock_state | jq -e '.messages[0].text | (contains("📁 demo\n💻 ") and (contains("━") | not))' >/dev/null
 }

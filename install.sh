@@ -13,6 +13,9 @@
 #   WITH_DEBUG=1   — поставить и отладочный хук (PreCompact + SessionStart)
 #   ENABLE=0       — не включать уведомления (не создавать флаг telegram-notify.on)
 #   ENABLE_QUESTIONS=0 — не включать вопросы с кнопками (не создавать telegram-question.on)
+#   ENABLE_PERMISSIONS=1 — включить кнопки «Разрешить/Отклонить» (telegram-permission.on);
+#                  по умолчанию ВЫКЛЮЧЕНО: решать за Claude из Telegram сможет любой, у кого
+#                  есть доступ к чату с ботом
 #   REF=v1.0.0     — поставить из тега/ветки (по умолчанию main)
 #   CLAUDE_DIR=... — каталог Claude Code (по умолчанию $CLAUDE_CONFIG_DIR или ~/.claude)
 set -e
@@ -116,6 +119,13 @@ jq --arg H "$HOOKS_DIR" --arg HOME_DIR "$HOME" '
   # $HOME в команде и тот же путь абсолютным — одна и та же запись: ручная установка по
   # settings.hooks.json пишет $HOME, установщик — абсолютный путь (иначе хуки задвоились бы)
   def norm: gsub("\\$HOME"; $HOME_DIR) | gsub("\\$\\{HOME\\}"; $HOME_DIR);
+  # заменить запись с тем же command на $entry (так обновляется matcher у уже стоящей записи)
+  def replace($e; $entry):
+    .hooks = (.hooks // {})
+    | .hooks[$e] = ((.hooks[$e] // [])
+        | map(.hooks |= map(select(((.command // "") | norm) != ($entry.hooks[0].command | norm))))
+        | map(select((.hooks | length) > 0)))
+    | .hooks[$e] += [$entry];
   # добавить $entry в .hooks[$e], если такого command там ещё нет
   def ensure($e; $entry):
     .hooks = (.hooks // {})
@@ -130,7 +140,8 @@ jq --arg H "$HOOKS_DIR" --arg HOME_DIR "$HOME" '
   | ensure("PreToolUse";    {matcher:"", hooks:[{type:"command", command:hookcmd("permit")}]})
   | ensure("SessionEnd";    {hooks:[{type:"command", command:hookcmd("end")}]})
   | ensure("PermissionRequest"; {matcher:"AskUserQuestion", hooks:[{type:"command", command:hookcmd("question"), timeout:3600}]})
-  | ensure("PostToolUse";   {matcher:"AskUserQuestion", hooks:[{type:"command", command:hookcmd("answered")}]})
+  | ensure("PermissionRequest"; {matcher:"", hooks:[{type:"command", command:hookcmd("permission"), timeout:3600}]})
+  | replace("PostToolUse";  {matcher:"", hooks:[{type:"command", command:hookcmd("answered")}]})
   '"$DEBUG_FILTER"'
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
 say "хуки прописаны в $SETTINGS (бэкап: $SETTINGS.bak)"
@@ -149,6 +160,14 @@ if [ "${ENABLE_QUESTIONS:-1}" = "1" ]; then
   say "вопросы с кнопками включены (флаг telegram-question.on)"
 else
   say "вопросы с кнопками НЕ включены (ENABLE_QUESTIONS=0). Включить: touch $CLAUDE_DIR/telegram-question.on"
+fi
+
+# 7. кнопки разрешений: ВЫКЛЮЧЕНЫ по умолчанию (меняют, кто может одобрять инструменты)
+if [ "${ENABLE_PERMISSIONS:-0}" = "1" ]; then
+  touch "$CLAUDE_DIR/telegram-permission.on"
+  say "кнопки «Разрешить/Отклонить» включены (флаг telegram-permission.on)"
+else
+  say "кнопки «Разрешить/Отклонить» НЕ включены; включить: touch $CLAUDE_DIR/telegram-permission.on"
 fi
 
 echo

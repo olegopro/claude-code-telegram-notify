@@ -49,7 +49,7 @@ say "файлы хуков удалены из $HOOKS_DIR"
 # 3. выключить и подчистить флаги/временное
 #    ВНИМАНИЕ: /tmp/claude_notif_* — общие для всех сессий; чистка собьёт метки
 #    у параллельных активных сессий (восстановятся при следующем промпте).
-rm -f "$CLAUDE_DIR/telegram-notify.on" "$CLAUDE_DIR/telegram-notify.debug" "$CLAUDE_DIR/telegram-question.on"
+rm -f "$CLAUDE_DIR/telegram-notify.on" "$CLAUDE_DIR/telegram-notify.debug" "$CLAUDE_DIR/telegram-question.on" "$CLAUDE_DIR/telegram-permission.on"
 rm -f /tmp/claude_notif_* /tmp/claude_tg_q_* 2>/dev/null || true
 say "уведомления выключены, временные файлы очищены"
 
